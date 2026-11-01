@@ -1,0 +1,59 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet -r requirements.txt
+      - run: python tests/install_test.py
+      - run: python tests/switch_test.py
+      - run: python tests/rescue_test.py
+
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VERSION has its CHANGELOG section
+        run: |
+          v="$(tr -d ' \r\n' < VERSION)"
+          grep -q "^## $v\$" CHANGELOG.md || { echo "CHANGELOG.md has no '## $v' section"; exit 1; }
+
+  windows-exe:
+    name: FM1-Switch.exe
+    needs: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet mido python-rtmidi pyinstaller
+      # the same build as tools/build_switch_exe.bat
+      - run: python -m PyInstaller --noconfirm --onefile --windowed --name FM1-Switch --paths . --hidden-import mido.backends.rtmidi fm1_switch.pyw
+        working-directory: tools
+      - name: The .exe starts its rescue part (no device: it reports the missing package and exits)
+        shell: bash
+        run: |
+          set +e
+          tools/dist/FM1-Switch.exe --rescue nothing.fwsc --progress p.jsonl
+          echo "exit $?"
+          cat p.jsonl
+          grep -q '"end": "fail"' p.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FM1-Switch-windows
+          path: tools/dist/FM1-Switch.exe
