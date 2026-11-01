@@ -44,9 +44,20 @@ nb.write_bytes(T.package("FM-1_900"))
 
 folders = S.default_folders(d)
 ok(d / "Firmware Wild" in folders and d / "Firmware NB303" in folders, "default folders: its own and the Firmware ones")
-pk = S.scan(folders)
+allpk = S.scan(folders)
+ok([(p.product, p.kind) for p in allpk] == [("FM-1_999", "other"), ("FM-1_900", "felucca"), ("FM-1_846", "felucca")]
+   and "rescue only" in allpk[0].label(), f"scan: every FM-1 package, without a loader marked rescue only")
+pk = S.scan(folders, rescue_only=False)
 ok([p.product for p in pk] == ["FM-1_900", "FM-1_846"] and [p.family for p in pk] == ["NB303", "Wild"],
-   f"scan: FM-1 packages only, highest first ({[p.product for p in pk]})")
+   f"scan: the installable ones, highest first ({[p.product for p in pk]})")
+try:
+    S.install(T.FakeFM1(b""), allpk[0], lambda *a: None)
+    ok(False, "Install: a package without the loader is refused (Rescue's)")
+except I.InstallError as e:
+    ok(e.code == "badpkg" and "Rescue" in str(e), "Install: a package without the loader is refused (Rescue's)")
+ch = S.rescue_choices(folders)
+ok(ch[0] is None and [p.product for p in ch[1:]] == ["FM-1_999", "FM-1_900", "FM-1_846"],
+   "rescue choices: V15 first (to download when not found), then any FM-1 firmware")
 
 dev = T.FakeFM1(I.logical_image(T.package("FM-1_846")), identity="FM-1_900", after_write="FM-1_846")
 ok(S.device_text(dev) == "FM-1_900", "reads the FM-1: FM-1_900")
@@ -105,6 +116,11 @@ ok(all(p.title and p.steps and p.button for p in [S.plan(st, "FM-1_1", sc, la) f
 # ---- Rescue…: the command it runs as administrator / root
 rd = S.rescue_dir(d)
 ok(rd == d / "FM-1 Rescue" and rd.is_dir(), "rescue folder: beside the program")
+ok("--any-firmware" in S.rescue_args("w.fwsc", rd, "p", True) and "--any-firmware" not in S.rescue_args("v.fwsc", rd, "p")
+   and (lambda a: a[a.index("--via") + 1] == "transporter")(S.rescue_args("v.fwsc", rd, "p", via="transporter")),
+   "rescue: another firmware with --any-firmware, the adapter with --via transporter")
+ok(not S.accepted(rd) and (S.accept(rd) or S.accepted(rd)) and "OWN RISK" in S.DISCLAIMER and "NO WARRANTY" in S.DISCLAIMER,
+   "disclaimer: asked once, remembered; own risk, no warranty")
 a = S.rescue_args(rd / "FM-1-V15.fwsc", rd, "/tmp/p.jsonl")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
    and a[a.index("--backup-dir") + 1] == str(rd), "rescue: V15, --write, the backup folder, the progress file")

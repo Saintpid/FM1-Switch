@@ -1,5 +1,9 @@
 # FM-1 Switch
 
+> **Everything you do with FM-1 Switch is at your own risk.** Installing or rescuing firmware can
+> leave your FM-1 unusable for good. There is no warranty, and neither Noisebud nor the author nor any
+> contributor is responsible for anything that happens. See [DISCLAIMER.md](DISCLAIMER.md).
+
 A small window for the M-VAVE FM-1 that installs any FM-1 firmware file (`.fwsc`), in either
 direction and whatever its number, and that checks and rescues an FM-1 that seems bricked. It runs
 on Windows and on the Mac.
@@ -45,22 +49,38 @@ Press **Check / unbrick…**. A guide takes you through it in three steps:
      [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter), an RP2040 board wired to
      the USB lines that wakes the chip's update mode from outside.
 
-**Try to unbrick** (also the **Rescue…** button) puts M-VAVE's stock firmware (FM-1 V15) back through the chip's own update mode, with
-no extra hardware:
+**Try to unbrick** (also the **Rescue…** button) puts a firmware back through the chip's own update
+mode, with no extra hardware. First you **choose the firmware**: M-VAVE's V15 is chosen at the top,
+because it is what the FM-1 came with. Any other FM-1 firmware works too: anything in the list, or
+any file with **Browse…** (Wild, NB303, n001se, FiMba-1, another M-VAVE version, other people's
+firmware). Then you **tick that it is at your own risk**, and it starts:
 
-- It finds V15 among your `.fwsc` files by its SHA-256, whatever the file is called. If it is not
+- For V15, it finds the file among your `.fwsc` files by its SHA-256, whatever the file is called. If it is not
   there, it downloads V15 from M-VAVE's server and checks it. It also downloads JieLi's flash loader
   (`wl82loader.bin`, from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)) and checks
   that. Both are kept in `FM-1 Rescue` beside the program.
 - It needs an administrator on Windows (Windows asks) or your password on the Mac, so that it can
   take the FM-1 away from the system.
 - It saves the whole flash (1 MiB) in `FM-1 Rescue` before anything else.
-- It writes only the parts of the firmware area (0x4000–0x93000) that differ from V15. The chip's
-  boot code below 0x4000 and the device data above 0x93000 are never written. Nothing is written if
-  the boot code differs from V15's, or if the chip and its flash are not the FM-1's.
+- It writes only the parts of the firmware area (0x4000–0x93000) that differ from the chosen
+  firmware. The chip's boot code below 0x4000 and the device data above 0x93000 are never written,
+  so the FM-1 keeps its own boot part, the same way an ordinary update does. Nothing is written if
+  the chip and its flash are not the FM-1's, or if the firmware's app area does not decrypt with this
+  chip's key (a firmware for another chip). For V15, the boot part must also already be V15's.
+- A firmware that is neither V15 nor Felucca-based may not fall back to the chip's update mode by
+  itself if it fails to start. The next rescue could then need the adapter.
 - **Stop** gives up while it waits. A write that has begun is finished.
 
-After a rescue, install Wild, NB303 or another firmware as usual.
+After a rescue to V15, you can install Wild, NB303 or another firmware as usual.
+
+**Experimental: through an FM-1-transporter.** An FM-1 that shows nothing at all on USB can't reach
+the chip's update mode by itself. An [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter)
+is an RP2040 board (a Seeed XIAO RP2040) wired to the FM-1's USB lines with three wires: D+, D− and
+GND, never 5 V. It wakes that mode from outside at power-on. When a rescue never sees the FM-1, the
+guide offers **Try with the adapter (experimental)**. That runs the same rescue through the adapter's
+serial port, with the same checks, and the adapter's own firmware also refuses anything outside
+0x4000–0x93000. It needs no administrator. If the FM-1 runs no firmware, switch it off when the app
+says so, then on. **This has not been tried on an FM-1 from this app yet.**
 
 On Windows it talks to the FM-1 through the Windows disk driver (SCSI pass-through), so no driver
 has to be installed. On the Mac it uses libusb, which is bundled in the app. The protocol and the
@@ -90,6 +110,8 @@ python3 tools/fm1_install.py --info              # what the FM-1 runs
 sudo python3 tools/fm1_rescue.py FM-1.fwsc       # Mac/Linux: check and back up, write nothing
 sudo python3 tools/fm1_rescue.py FM-1.fwsc --write
 python tools/fm1_rescue.py --download --write    # Windows, as administrator (V15 from M-VAVE)
+python tools/fm1_rescue.py Wild.fwsc --any-firmware --write              # another firmware
+python tools/fm1_rescue.py FM-1.fwsc --via transporter --write           # EXPERIMENTAL: the adapter
 ```
 
 ## Tests
@@ -101,14 +123,17 @@ with no hardware, no Tk and no MIDI or USB packages:
 - `switch_test.py`: the window's core, the diagnosis and the command that Rescue runs as
   administrator or root.
 - `rescue_test.py`: the rescue against a simulated UBOOT (the ROM and JieLi's loader at the level of
-  their commands), over USB and over a simulated Windows pass-through.
+  their commands), over USB, over a simulated Windows pass-through and over a simulated
+  FM-1-transporter. It covers any firmware with the FM-1's head kept, and refuses one for another
+  chip key.
 
 CI runs them on Linux, Windows and macOS.
 
 ## Credits and licence
 
-GPL-3.0 (see `LICENSE`). The installer is Felucca's (`fm1_install.py`, Leo Kuroshita / Hügelton
+GPL-3.0 (see `LICENSE`), with no warranty and no liability (its sections 15 and 16, and
+[DISCLAIMER.md](DISCLAIMER.md)). The installer is Felucca's (`fm1_install.py`, Leo Kuroshita / Hügelton
 Instruments). The rescue protocol and write policy come from
 [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter) (MIT) and the X0X firmware's
-`fm1_rescue.py`. The flash loader is from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)
+`fm1_rescue.py`. The adapter support speaks FM-1-transporter's `fm1t` protocol. The flash loader is from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)
 (MIT). It is downloaded, not included. Not affiliated with M-VAVE or JieLi.

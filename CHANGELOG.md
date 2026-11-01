@@ -2,6 +2,21 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.1.0
+
+- **Rescue to any firmware.** Before a rescue starts, you choose what goes back on the FM-1. M-VAVE's
+  V15 is chosen first, but any FM-1 firmware file works: Wild, NB303, n001se, FiMba-1, another
+  M-VAVE version, or other people's firmware (Browse…). The firmware's app is written, and the
+  FM-1's own boot part always stays, as in a normal update. A firmware made for another chip is
+  refused before anything is written.
+- **A clear warning:** a rescue starts only after you tick that it is at your own risk. The first
+  time the app starts it shows the disclaimer (also under About…, and in DISCLAIMER.md).
+- **Experimental: rescue through an FM-1-transporter adapter** (an RP2040 board wired to the
+  FM-1's USB lines), for an FM-1 that shows nothing at all on USB. It is in the guide when a rescue
+  never sees the FM-1. It has not been tried on hardware from this app yet.
+- The list shows every FM-1 firmware file. Files without Felucca's updater (V15 and others) are
+  marked "rescue only".
+
 ## 1.0.0
 
 FM-1 Switch in its own repository (it came from Wild's `tools/`).

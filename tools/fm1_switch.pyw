@@ -70,22 +70,43 @@ def default_folders(here=None):
 
 
 class Package:
-    def __init__(self, path, product):
-        self.path, self.product = Path(path), product
-        self.number = int(product.split("_")[1])
+    """an FM-1 package; kind "felucca" installs over USB-MIDI, "v15" / "other" only by Rescue"""
+
+    def __init__(self, path, product, kind="felucca"):
+        self.path, self.product, self.kind = Path(path), product, kind
+        m = re.fullmatch(r"[^_]+_(\d+)", product)
+        self.number = int(m[1]) if m else 0
 
     @property
     def family(self):
+        if self.kind == "v15":
+            return "M-VAVE"
         n = self.path.name.lower()
         return "NB303" if n.startswith("nb303") else "Wild" if n.startswith("wild") else \
             "n001se" if n.startswith("n001se") else "?"
 
     def label(self):
-        return f"{self.path.stem}   ({self.product})"
+        return f"{self.path.stem}   ({'V15' if self.kind == 'v15' else self.product})" + \
+            ("   rescue only" if self.kind != "felucca" else "")
 
 
-def scan(folders):
-    """every FM-1 package in the folders, the highest number first"""
+def package_at(f):
+    """the Package for a file, or None if it is not an FM-1 package"""
+    try:
+        raw = Path(f).read_bytes()
+        product = I.product_of(raw)
+    except (OSError, I.InstallError):
+        return None
+    if R.sha256(raw) == R.STOCK_SHA256:
+        return Package(f, product, "v15")
+    if re.fullmatch(r"[^_]+_\d+", product) and I.model_of(product) == "FM-1":
+        return Package(f, product, "felucca" if I.LOADER_MARK in raw else "other")
+    return None
+
+
+def scan(folders, rescue_only=True):
+    """every FM-1 package in the folders, the highest number first (M-VAVE's V15 and other non-Felucca
+    firmware too, marked rescue only, unless rescue_only is False)"""
     seen, out = set(), []
     for d in folders:
         try:
@@ -97,15 +118,18 @@ def scan(folders):
             if key in seen:
                 continue
             seen.add(key)
-            try:
-                raw = f.read_bytes()
-                product = I.product_of(raw)
-            except (OSError, I.InstallError):
-                continue
-            if re.fullmatch(r"[^_]+_\d+", product) and I.model_of(product) == "FM-1" and I.LOADER_MARK in raw:
-                out.append(Package(f, product))
-    out.sort(key=lambda p: (-p.number, p.path.name))
+            p = package_at(f)
+            if p and (rescue_only or p.kind == "felucca"):
+                out.append(p)
+    out.sort(key=lambda p: (p.kind == "v15", -p.number, p.path.name))
     return out
+
+
+def rescue_choices(folders):
+    """what Rescue can put back: V15 first (None: download it from M-VAVE), then the rest"""
+    pk = scan(folders)
+    v15 = [p for p in pk if p.kind == "v15"][:1]
+    return (v15 or [None]) + [p for p in pk if p.kind != "v15"]
 
 
 def device_text(backend):
@@ -120,6 +144,10 @@ def device_text(backend):
 
 def install(backend, pkg, step):
     """the whole update; step(kind, value) as fm1_install's Progress gets it. -> the identity after"""
+    if pkg.kind != "felucca":
+        raise I.InstallError("badpkg", f"{pkg.path.name} has no Felucca update loader, so it cannot be "
+                                       "installed over USB-MIDI here: use M-UPGRADE, or Check / unbrick… "
+                                       "and Rescue, which puts any FM-1 firmware back")
     product, image = I.load_package(str(pkg.path), False)
     up = I.Updater(backend)
     dev = up.find()
@@ -224,7 +252,9 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
                      "to the FM-1's USB lines with three wires (D+, D-, GND; never 5 V).",
                      "It wakes the chip's update mode from outside and puts the firmware back the same "
                      "careful way (a backup first, the boot code never written).",
-                     "Before that: charge the FM-1 for half an hour and try Rescue once more."],
+                     "Before that: charge the FM-1 for half an hour and try Rescue once more.",
+                     "With the adapter wired and on USB: Try with the adapter (experimental). It has not "
+                     "been tried on an FM-1 from this app yet."],
                     "Open the FM-1-transporter guide")
     if state == "running":
         return Plan("install", f"The FM-1 runs {ident}: it is not bricked",
@@ -268,11 +298,12 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
 def _rescue(title, why):
     return Plan("rescue", title,
                 [*why,
-                 "Press Try to unbrick. It asks for " + ("an administrator" if sys.platform == "win32"
-                                                         else "your password") + ", then waits.",
+                 "Press Try to unbrick and choose the firmware to put back (M-VAVE's V15 is the safest; "
+                 "any FM-1 firmware works). It asks for " + ("an administrator" if sys.platform == "win32"
+                                                              else "your password") + ", then waits.",
                  "Then switch the FM-1 off and on (or leave it restarting). When it goes blank, it is "
                  "caught; the write takes about a minute. Do not unplug it.",
-                 "Afterwards it runs M-VAVE's V15: install Wild or NB303 as usual."],
+                 "Afterwards it runs the firmware you chose; from V15 you can install Wild or NB303 as usual."],
                 "Try to unbrick")
 
 
@@ -293,6 +324,45 @@ def rescue_dir(here=None):
     return Path(tempfile.mkdtemp(prefix="fm1-rescue-"))
 
 
+def app_version():
+    for p in (Path(getattr(sys, "_MEIPASS", "")) / "VERSION", Path(__file__).resolve().parent.parent / "VERSION"):
+        try:
+            return p.read_text().strip()
+        except OSError:
+            continue
+    return ""
+
+
+DISCLAIMER = """FM-1 Switch is free, open-source software (GPL-3.0), made by a hobbyist and \
+given away as it is.
+
+Everything you do with it is AT YOUR OWN RISK. Installing or rescuing firmware can fail, and \
+can leave your FM-1 unusable for good. There is NO WARRANTY of any kind, and neither \
+Noisebud nor the author nor anyone who contributed to it is responsible or liable for \
+anything that happens to your FM-1, your computer, your files or anything else, however it \
+happens.
+
+FM-1 Switch is not made, approved or supported by M-VAVE or JieLi. Do not use it if you do not \
+accept this."""
+
+RESCUE_RISK = ("I understand that this writes to my FM-1's flash at my own risk, that it can make the "
+               "FM-1 unusable for good, and that nobody (Noisebud, the author, M-VAVE) is responsible.")
+
+
+def accepted(d):
+    try:
+        return (Path(d) / "accepted-disclaimer.txt").read_text().strip() == "yes"
+    except OSError:
+        return False
+
+
+def accept(d):
+    try:
+        (Path(d) / "accepted-disclaimer.txt").write_text("yes\n")
+    except OSError:
+        pass
+
+
 def helper_command(args):
     """this program with --rescue: the .exe / the .app itself, or Python with this script"""
     if getattr(sys, "frozen", False):
@@ -300,9 +370,13 @@ def helper_command(args):
     return [sys.executable, str(Path(__file__).resolve()), "--rescue", *args]
 
 
-def rescue_args(stock, d, progress):
-    a = [str(stock), "--write", "--backup-dir", str(d), "--loader", str(d / R.LOADER_NAME),
+def rescue_args(target, d, progress, any_firmware=False, via="usb"):
+    a = [str(target), "--write", "--backup-dir", str(d), "--loader", str(d / R.LOADER_NAME),
          "--wait", "300", "--tries", "5", "--progress", str(progress)]
+    if any_firmware:
+        a.append("--any-firmware")
+    if via != "usb":
+        a += ["--via", via]
     if hasattr(os, "getuid"):
         a += ["--owner", f"{os.getuid()}:{os.getgid()}"]
     return a
@@ -352,8 +426,8 @@ def _shell_runas(cmd):
     return wait
 
 
-RESCUE_STEP = {"backup": "Backup saved: {}", "write": "Writing V15 {}%",
-               "done": "Done: the FM-1 runs M-VAVE's V15. Install Wild or NB303 as usual."}
+RESCUE_STEP = {"backup": "Backup saved: {}", "write": "Writing {}%",
+               "done": "Done: the firmware is back on the FM-1, and it restarts."}
 
 
 # ------------------------------------------------------------------- window ---
@@ -425,45 +499,108 @@ def main():
             ui(busy, False)
         threading.Thread(target=work, daemon=True).start()
 
-    def do_rescue():
+    def do_rescue(via="usb"):
+        """Rescue: 1 choose the firmware to put back, 2 accept the risk, 3 run it"""
         if state["rescue"]:                                     # the button is Stop while it waits
             open(state["rescue"] + ".stop", "w").close()
             status.set("Stopping (only while it waits: a write in progress is finished)…")
             return
-        d = rescue_dir()
-        stock = R.find_stock([str(f) for f in folders] + [str(d)])
-        if not messagebox.askyesno(
-                "FM-1 Switch – Rescue",
-                "Rescue puts M-VAVE's stock firmware (FM-1 V15) back on an FM-1 whose firmware no "
-                "longer starts, through the chip's own update mode.\n\n"
-                "• The whole flash is saved first, as a backup in:\n   " + str(d) + "\n"
-                "• The chip's boot code is never written, and nothing is written unless the chip and "
-                "its flash are the FM-1's.\n"
-                + ("" if stock else "• V15 is downloaded from M-VAVE's server and checked.\n")
-                + "• It needs " + ("an administrator" if sys.platform == "win32" else "your password")
-                + " (to take the FM-1 from the system).\n\n"
-                "Then switch the FM-1 off and on. When it crashes and goes blank, it is caught "
-                "(it waits up to 5 minutes).\n\nStart the rescue?"):
+        if state["busy"]:
             return
+        d = rescue_dir()
+        choices = rescue_choices(folders + [d])
+        w = tk.Toplevel(root)
+        w.title("FM-1 Switch – Rescue" + (" through the adapter (experimental)" if via != "usb" else ""))
+        w.geometry("640x520")
+        w.transient(root)
+        w.grab_set()
+        f = ttk.Frame(w, padding=14)
+        f.pack(fill="both", expand=True)
+        wrap = 600
+        ttk.Label(f, text="1. Choose the firmware to put back", font=ui_font + ("bold",)).pack(anchor="w")
+        ttk.Label(f, text="M-VAVE's own V15 is the safest choice: it is what the FM-1 came with. Any other "
+                          "FM-1 firmware works too (its app is written; the FM-1's own boot part stays).",
+                  wraplength=wrap, justify="left").pack(anchor="w", pady=(4, 6))
+        box = tk.Listbox(f, height=7, font=mono, activestyle="none", exportselection=False)
+        box.pack(fill="x")
+
+        def names():
+            box.delete(0, "end")
+            for c in choices:
+                box.insert("end", "M-VAVE  V15 (not found here: downloaded from M-VAVE and checked)" if c is None
+                           else f"{c.family:<7} {c.label()}")
+        names()
+        box.selection_set(0)
+
+        def browse():
+            fn = filedialog.askopenfilename(parent=w, title="An FM-1 firmware file",
+                                            filetypes=[("FM-1 firmware", "*.fwsc"), ("All files", "*.*")])
+            if not fn:
+                return
+            pkg = package_at(fn)
+            if pkg is None:
+                messagebox.showerror("FM-1 Switch", f"{Path(fn).name} is not an FM-1 firmware file.", parent=w)
+                return
+            choices.append(pkg)
+            names()
+            box.selection_clear(0, "end")
+            box.selection_set("end")
+            box.see("end")
+        ttk.Button(f, text="Browse…", command=browse).pack(anchor="w", pady=(6, 0))
+        note = tk.StringVar()
+        ttk.Label(f, textvariable=note, wraplength=wrap, justify="left").pack(anchor="w", pady=(4, 0))
+
+        def picked(_e=None):
+            sel = box.curselection()
+            c = choices[sel[0]] if sel else None
+            note.set("" if c is None or c.kind != "other" else
+                     "Not V15 and not Felucca-based: if it does not start, it may not fall back to the "
+                     "chip's update mode by itself, and the next rescue may need the adapter.")
+        box.bind("<<ListboxSelect>>", picked)
+        ttk.Label(f, text="2. Your own risk", font=ui_font + ("bold",)).pack(anchor="w", pady=(12, 0))
+        ttk.Label(f, text="The whole flash is saved first, the chip's boot code is never written, and nothing "
+                          "is written unless the chip and its flash are the FM-1's. Even so, this can fail.",
+                  wraplength=wrap, justify="left").pack(anchor="w", pady=(4, 4))
+        ok_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text=RESCUE_RISK, variable=ok_var,
+                        command=lambda: go.state(["!disabled"] if ok_var.get() else ["disabled"])).pack(anchor="w")
+        row2 = ttk.Frame(f)
+        row2.pack(fill="x", side="bottom")
+
+        def start():
+            sel = box.curselection()
+            c = choices[sel[0]] if sel else None
+            w.grab_release()
+            w.destroy()
+            run_rescue(c, d, via)
+        go = ttk.Button(row2, text="Start the rescue", command=start)
+        go.state(["disabled"])
+        go.pack(side="left")
+        ttk.Button(row2, text="Cancel", command=w.destroy).pack(side="right")
+
+    def run_rescue(target, d, via):
         busy(True)
         rb.state(["!disabled"])
         bar["value"] = 0
         fd, prog = tempfile.mkstemp(prefix="fm1-rescue-", suffix=".jsonl")
         os.close(fd)
+        name = "M-VAVE's V15" if target is None or target.kind == "v15" else target.path.name
 
         def work():
             try:
-                path = stock or R.download_stock(str(d), lambda t: ui(status.set, t.strip()))
+                path = target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip()))
                 ui(status.set, "Getting JieLi's flash loader…")
                 R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
-                wait = run_elevated(helper_command(rescue_args(path, d, prog)))
+                cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via))
+                wait = subprocess.Popen(cmd).wait if via != "usb" else run_elevated(cmd)
             except Exception as e:
                 ui(status.set, f"Rescue not started: {e}")
                 ui(end_rescue)
                 return
             state["rescue"] = prog
             ui(rb.configure, text="Stop")
-            ui(status.set, "Waiting for the FM-1 in the chip's update mode: switch it off and on now.")
+            ui(status.set, f"Putting back {name}. Waiting for the FM-1 in the chip's update mode: "
+                           + ("follow the adapter's steps." if via != "usb" else "switch it off and on now."))
             done, pos, end = {"code": None}, 0, None
             t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
             t.start()
@@ -486,10 +623,11 @@ def main():
                     break
                 time.sleep(0.2)
             if end and end["end"] == "ok":
-                ui(dev_var.set, "FM-1: runs M-VAVE's V15")
-                ui(status.set, RESCUE_STEP["done"])
-                ui(messagebox.showinfo, "FM-1 Switch", RESCUE_STEP["done"])
-            elif end and "did not appear" in (end.get("error") or ""):
+                msg = f"Done: {name} is back on the FM-1, and it restarts."
+                ui(dev_var.set, f"FM-1: {name}")
+                ui(status.set, msg)
+                ui(messagebox.showinfo, "FM-1 Switch", msg)
+            elif end and "did not appear" in (end.get("error") or "") and via == "usb":
                 ui(status.set, "Rescue: the FM-1 did not show up in the chip's update mode.")
                 ui(open_guide, "rescue_failed")
             elif end:
@@ -599,6 +737,9 @@ def main():
             row2 = ttk.Frame(body)
             row2.pack(fill="x", side="bottom")
             ttk.Button(row2, text=p.button, command=lambda: act(p)).pack(side="left")
+            if p.action == "hardware":
+                ttk.Button(row2, text="Try with the adapter (experimental)",
+                           command=lambda: (close(), do_rescue("transporter"))).pack(side="left", padx=6)
             if p.action != "check":
                 ttk.Button(row2, text="Check again", command=detect).pack(side="left", padx=6)
             ttk.Button(row2, text="Close", command=close).pack(side="right")
@@ -668,7 +809,11 @@ def main():
                ttk.Button(row, text="Refresh", command=refresh)]
     for b in buttons:
         b.pack(side="left", padx=(0, 6))
-    rb = ttk.Button(row, text="Rescue…", command=do_rescue)
+    rb = ttk.Button(row, text="Rescue…", command=lambda: do_rescue())
+    ab = ttk.Button(row, text="About…", command=lambda: messagebox.showinfo(
+        "About FM-1 Switch", f"FM-1 Switch {app_version()}\n\n" + DISCLAIMER
+        + "\n\nSource and licence: github.com/Saintpid/FM1-Switch (GPL-3.0)"))
+    ab.pack(side="right", padx=(0, 6))
     rb.pack(side="right")
     buttons.append(rb)
 
@@ -684,6 +829,13 @@ def main():
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", closing)
     refresh()
+    d0 = rescue_dir()
+    if not accepted(d0):
+        if not messagebox.askokcancel("FM-1 Switch – read this first", DISCLAIMER + "\n\nOK: I accept this. "
+                                                                      "Cancel: quit."):
+            root.destroy()
+            return
+        accept(d0)
     check_device(0)
     root.mainloop()
 
