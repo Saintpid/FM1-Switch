@@ -86,6 +86,22 @@ texts = [S.advice("running", "FM-1_846"), S.advice("loader", "ota-FM-1_900"), S.
 ok("Install" in texts[1][1] and "Rescue" in texts[2][1] and "transporter" in texts[3][1]
    and "pyusb" in texts[4][1] and "FM-1_846" in texts[0][0], "advice: what to do in each state")
 
+# ---- the unbrick guide: the FM-1 first, questions only when it says nothing, then one thing to try
+ok([S.needs_questions(x) for x in ("running", "loader", "uboot", "none")] == [False, False, False, True],
+   "guide: asks only when the FM-1 says nothing")
+ok(S.plan("running", "FM-1_846").action == "install" and S.plan("loader", "ota-FM-1_900").action == "finish"
+   and S.plan("uboot").action == "rescue", "guide: what the FM-1 says decides by itself")
+acts = {k: S.plan("none", screen=k).action for k, _ in S.SCREEN}
+ok(acts == {"normal": "check", "safe": "check", "update": "check", "dark": "rescue", "loop": "rescue"},
+   f"guide: by the screen, a picture is the cable, dark or restarting is Rescue ({acts})")
+ok(S.plan("none").action == "check" and S.plan("none", screen="loop", rescue_failed=True).action == "hardware",
+   "guide: no answers: check again; a rescue that never caught it: the hardware")
+ok("Charge" in " ".join(S.plan("none", screen="dark").steps) and "Install" in " ".join(S.plan("none", screen="update").steps),
+   "guide: dark asks for charging first; update mode finishes with Install")
+ok(all(p.title and p.steps and p.button for p in [S.plan(st, "FM-1_1", sc, la) for st in ("running", "loader", "uboot", "none")
+                                                   for sc, _ in S.SCREEN + ((None, ""),) for la, _ in S.LAST]),
+   "guide: every case has a title, steps and a button")
+
 # ---- Rescue…: the command it runs as administrator / root
 rd = S.rescue_dir(d)
 ok(rd == d / "FM-1 Rescue" and rd.is_dir(), "rescue folder: beside the program")

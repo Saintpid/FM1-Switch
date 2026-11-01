@@ -29,6 +29,7 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -178,6 +179,101 @@ def advice(state, ident=None, probe_ok=True):
             "chip's own update mode, where it is caught."
             + ("" if probe_ok else " (This computer cannot see that mode: pyusb is missing.)")
             + " 4. If nothing at all shows on USB: it needs an FM-1-transporter (RP2040) adapter.")
+
+
+# ----------------------------------------------------------------- guide ---
+# The unbrick guide: what the FM-1 says first; the user's answers only where it says nothing; then
+# one thing to try, behind one button.
+
+SCREEN = (("normal", "Its usual picture (or Wild / NB303 running)"),
+          ("safe", "\"SAFE MODE\""),
+          ("update", "\"UPDATE MODE\""),
+          ("dark", "Nothing: the screen stays dark"),
+          ("loop", "It starts, goes blank, and starts again (over and over)"))
+LAST = (("cut", "An install was cut off (the cable, the computer slept, an app closed)"),
+        ("nostart", "I installed a firmware, and now it does not start"),
+        ("other", "Nothing special, or I don't know"))
+
+
+class Plan:
+    """what to do: a title, the steps for the user, and what the button does
+    (action: "install", "finish", "check", "rescue" or "hardware"; button: its text)"""
+
+    def __init__(self, action, title, steps, button):
+        self.action, self.title, self.steps, self.button = action, title, list(steps), button
+
+
+CABLE = ("Use a USB data cable straight into the computer, no hub (many cables only charge: try "
+         "another one), and another USB port.",
+         "Close every other app that may hold the FM-1's MIDI port: a DAW, M-UPGRADE, a browser tab "
+         "with a web installer.")
+TRANSPORTER = "https://github.com/kurogedelic/FM-1-transporter"
+
+
+def needs_questions(state):
+    """only when the FM-1 says nothing does the guide ask"""
+    return state == "none"
+
+
+def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
+    """the Plan for what was found (diagnose()) and what the user answered (SCREEN, LAST)"""
+    if rescue_failed:
+        return Plan("hardware", "The FM-1 never showed up in the chip's update mode",
+                    ["Its firmware does not reach the chip's update mode on its own, so it needs a "
+                     "little hardware: an FM-1-transporter, an RP2040 board (a Seeed XIAO RP2040) wired "
+                     "to the FM-1's USB lines with three wires (D+, D-, GND; never 5 V).",
+                     "It wakes the chip's update mode from outside and puts the firmware back the same "
+                     "careful way (a backup first, the boot code never written).",
+                     "Before that: charge the FM-1 for half an hour and try Rescue once more."],
+                    "Open the FM-1-transporter guide")
+    if state == "running":
+        return Plan("install", f"The FM-1 runs {ident}: it is not bricked",
+                    ["Choose a firmware file in the list and press Install.",
+                     "If the screen is stuck while it runs, hold OCT- and OCT+ for 5 seconds: that is the "
+                     "update mode, and Install works from there too."],
+                    "Install the chosen file")
+    if state == "loader":
+        return Plan("finish", "An install was cut off: the FM-1 waits for it",
+                    ["Nothing is broken: the FM-1 is in update mode and will stay there until an install "
+                     "finishes.",
+                     "Choose a firmware file (the same one, or any other) and the install starts over and "
+                     "finishes. Do not unplug the FM-1 while it writes."],
+                    "Finish the install")
+    if state == "uboot":
+        return _rescue("The firmware does not start: the FM-1 is in the chip's own update mode",
+                       ["The chip waits for a computer to put a firmware back. Rescue puts M-VAVE's own "
+                        "(V15) back, and saves the whole flash first."])
+    if screen in ("normal", "safe", "update"):
+        what = {"normal": "It runs", "safe": "It is in Wild's safe mode (USB on, no sound)",
+                "update": "It is in update mode"}[screen]
+        return Plan("check", f"{what}, but the computer does not hear it",
+                    [*CABLE, "Switch the FM-1 off and on, then press Check again."
+                     + (" When it is found, Install finishes the update." if screen == "update" else "")],
+                    "Check again")
+    if screen == "dark":
+        return _rescue("The screen stays dark",
+                       ["Charge it first: plug it into a charger for 10 minutes. A flat battery looks "
+                        "just like this.", CABLE[0],
+                        "If it is still dark, its firmware does not start. Rescue catches it in the chip's "
+                        "own update mode"
+                        + (", which a firmware that keeps crashing reaches by itself." if last != "other"
+                           else ".")])
+    if screen == "loop":
+        return _rescue("Its firmware crashes while it starts",
+                       ["A firmware that keeps crashing reaches the chip's own update mode by itself, "
+                        "after a few tries. Rescue waits for that moment and catches it."])
+    return Plan("check", "The FM-1 was not found", [*CABLE, "Then press Check again."], "Check again")
+
+
+def _rescue(title, why):
+    return Plan("rescue", title,
+                [*why,
+                 "Press Try to unbrick. It asks for " + ("an administrator" if sys.platform == "win32"
+                                                         else "your password") + ", then waits.",
+                 "Then switch the FM-1 off and on (or leave it restarting). When it goes blank, it is "
+                 "caught; the write takes about a minute. Do not unplug it.",
+                 "Afterwards it runs M-VAVE's V15: install Wild or NB303 as usual."],
+                "Try to unbrick")
 
 
 # ---------------------------------------------------------------- rescue ---
@@ -393,6 +489,9 @@ def main():
                 ui(dev_var.set, "FM-1: runs M-VAVE's V15")
                 ui(status.set, RESCUE_STEP["done"])
                 ui(messagebox.showinfo, "FM-1 Switch", RESCUE_STEP["done"])
+            elif end and "did not appear" in (end.get("error") or ""):
+                ui(status.set, "Rescue: the FM-1 did not show up in the chip's update mode.")
+                ui(open_guide, "rescue_failed")
             elif end:
                 ui(status.set, f"Rescue: {end.get('error')}")
                 ui(messagebox.showerror, "FM-1 Switch – Rescue", end.get("error") or "failed")
@@ -405,6 +504,123 @@ def main():
             rb.configure(text="Rescue…")
             busy(False)
         threading.Thread(target=work, daemon=True).start()
+
+    def open_guide(start="detect"):
+        """the unbrick guide: 1 listen to the FM-1, 2 ask only what it did not say, 3 one thing to try"""
+        if state["busy"] and start != "rescue_failed":      # (that one comes as a rescue ends)
+            return
+        g = tk.Toplevel(root)
+        g.title("FM-1 Switch – Check and unbrick")
+        g.geometry("620x460")
+        g.transient(root)
+        body = ttk.Frame(g, padding=14)
+        body.pack(fill="both", expand=True)
+        live = {"open": True, "page": None}
+        wrap = 580
+
+        def clear(page):
+            live["page"] = page
+            for w in body.winfo_children():
+                w.destroy()
+
+        def close():
+            live["open"] = False
+            g.destroy()
+        g.protocol("WM_DELETE_WINDOW", close)
+
+        def heading(text):
+            ttk.Label(body, text=text, font=ui_font + ("bold",), wraplength=wrap, justify="left").pack(anchor="w")
+
+        def text(t, **kw):
+            ttk.Label(body, text=t, wraplength=wrap, justify="left").pack(anchor="w", **kw)
+
+        def detect():
+            clear("detect")
+            heading("Step 1 of 3: listening to the FM-1")
+            text("Connect the FM-1 with its USB cable and switch it on. For a few seconds the guide listens "
+                 "for it in every mode it can be in.", pady=(8, 0))
+            pb = ttk.Progressbar(body, mode="indeterminate")
+            pb.pack(fill="x", pady=14)
+            pb.start(12)
+
+            def work():
+                probe_ok = R.uboot_present() is not None
+                try:
+                    st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 8)
+                except Exception:       # (a MIDI port another app holds)
+                    st, ident = "none", None
+                ui(found, st, ident, probe_ok)
+            threading.Thread(target=work, daemon=True).start()
+
+        def found(st, ident, probe_ok):
+            if not live["open"]:
+                return
+            dev_var.set(advice(st, ident, probe_ok)[0])
+            if needs_questions(st):
+                ask(probe_ok)
+            else:
+                show(plan(st, ident))
+
+        def ask(probe_ok):
+            clear("ask")
+            heading("Step 2 of 3: what does the FM-1 do?")
+            text("The computer cannot hear the FM-1, so the guide needs your eyes. "
+                 "(It keeps listening meanwhile: if the FM-1 turns up, it goes on by itself.)", pady=(6, 8))
+            scr, last = tk.StringVar(value=""), tk.StringVar(value="other")
+            text("What does its screen show?")
+            for k, t in SCREEN:
+                ttk.Radiobutton(body, text=t, value=k, variable=scr).pack(anchor="w", padx=12)
+            text("What happened last?", pady=(10, 0))
+            for k, t in LAST:
+                ttk.Radiobutton(body, text=t, value=k, variable=last).pack(anchor="w", padx=12)
+            row2 = ttk.Frame(body)
+            row2.pack(fill="x", side="bottom")
+            ttk.Button(row2, text="Next", command=lambda: show(plan("none", screen=scr.get() or None,
+                                                                   last=last.get()))).pack(side="left")
+            ttk.Button(row2, text="Close", command=close).pack(side="right")
+
+            def watch():
+                while live["open"] and live["page"] == "ask":
+                    try:
+                        st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 0)
+                    except Exception:
+                        st, ident = "none", None
+                    if st != "none":
+                        ui(lambda: live["page"] == "ask" and found(st, ident, probe_ok))
+                        return
+                    time.sleep(1.0)
+            threading.Thread(target=watch, daemon=True).start()
+
+        def show(p):
+            clear("plan")
+            heading("Step 3 of 3: " + p.title)
+            for i, step in enumerate(p.steps, 1):
+                text(f"{i}. {step}", pady=(6, 0))
+            row2 = ttk.Frame(body)
+            row2.pack(fill="x", side="bottom")
+            ttk.Button(row2, text=p.button, command=lambda: act(p)).pack(side="left")
+            if p.action != "check":
+                ttk.Button(row2, text="Check again", command=detect).pack(side="left", padx=6)
+            ttk.Button(row2, text="Close", command=close).pack(side="right")
+
+        def act(p):
+            if p.action == "check":
+                detect()
+                return
+            close()
+            if p.action == "rescue":
+                do_rescue()
+            elif p.action == "hardware":
+                webbrowser.open(TRANSPORTER)
+            else:                       # install / finish: the chosen file, else the highest
+                if not lst.curselection() and state["pkgs"]:
+                    lst.selection_set(0)
+                do_install()
+
+        if start == "rescue_failed":
+            show(plan("none", rescue_failed=True))
+        else:
+            detect()
 
     def do_install():
         sel = lst.curselection()
@@ -446,7 +662,7 @@ def main():
             folders.append(Path(d))
             refresh()
 
-    buttons = [ttk.Button(row, text="Check FM-1", command=check_device),
+    buttons = [ttk.Button(row, text="Check / unbrick…", command=open_guide),
                ttk.Button(row, text="Install", command=do_install),
                ttk.Button(row, text="Add folder…", command=add_folder),
                ttk.Button(row, text="Refresh", command=refresh)]
