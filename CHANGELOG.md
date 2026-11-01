@@ -4,6 +4,12 @@ A version is a `VERSION` change with its section below (CI checks the section is
 
 ## 1.1.0
 
+- **A new look.** The window follows your system's dark or light mode in Windows 11's own style, with
+  sharp text on scaled screens. The FM-1's state sits on top with a coloured dot (green: running,
+  yellow: update mode, red: a problem), the firmware files are listed in columns, and Install is the
+  one blue button.
+- Run from source without the MIDI packages, the app said "FM-1: not found". Now it says that MIDI is
+  missing and how to fix it.
 - **Rescue to any firmware.** Before a rescue starts, you choose what goes back on the FM-1. M-VAVE's
   V15 is chosen first, but any FM-1 firmware file works: Wild, NB303, n001se, FiMba-1, another
   M-VAVE version, or other people's firmware (Browse…). The firmware's app is written, and the

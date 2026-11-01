@@ -131,5 +131,27 @@ osa = S.applescript_admin(["/Apps/FM 1/x", 'a"b', "c\\d"])
 ok(osa == 'do shell script "\'/Apps/FM 1/x\' \'a\\"b\' \'c\\\\d\'" with administrator privileges',
    f"rescue on a Mac: one quoted shell line for osascript ({osa})")
 
+
+# ---- MIDI missing: said so, not "FM-1 not found" (mido imports without python-rtmidi, fails at the port list)
+class NoRtmidi:
+    def input_names(self):
+        raise ModuleNotFoundError("No module named 'rtmidi'")
+
+
+def no_mido():
+    raise ImportError("No module named 'mido'")
+
+
+b0, why0 = S.open_midi(NoRtmidi)
+b1, why1 = S.open_midi(no_mido)
+b2, why2 = S.open_midi(lambda: dev)
+ok(b0 is None and "rtmidi" in why0 and b1 is None and "mido" in why1 and b2 is not None and why2 is None,
+   "MIDI: a missing backend is reported, a working one used")
+ok("pip install -r requirements.txt" in S.NO_MIDI.format(why0) and "rtmidi" in S.NO_MIDI.format(why0),
+   "MIDI: the window says how to fix it")
+ok([S.row_values(p) for p in allpk] == [("?", "noloader", "FM-1_999", "rescue only"),
+                                        ("NB303", "NB303-0.1.0", "FM-1_900", ""), ("Wild", "Wild-0.3.12", "FM-1_846", "")],
+   "list columns: family, file, identity, rescue only")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

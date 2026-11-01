@@ -5,3 +5,4 @@ python-rtmidi>=1.5    #   (mido's MIDI backend)
 pyusb>=1.2            # tools/fm1_rescue.py on a Mac or Linux: the chip's own update mode (Windows needs none)
 libusb-package>=1.0   #   (libusb for pyusb, bundled: no brew install needed)
 pyserial>=3.5          # tools/fm1_rescue.py --via transporter (EXPERIMENTAL): the FM-1-transporter adapter
+sv-ttk>=2.6           # tools/fm1_switch.pyw: the window's look (Windows 11's Sun Valley theme; plain Tk without it)

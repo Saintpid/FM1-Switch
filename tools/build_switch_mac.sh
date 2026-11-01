@@ -34,17 +34,17 @@ echo "Cleaning previous Mac build..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-echo "Installing the build packages (mido, python-rtmidi, pyusb, libusb-package, pyserial, PyInstaller) in $VENV..."
+echo "Installing the build packages (mido, python-rtmidi, pyusb, libusb-package, pyserial, sv-ttk, PyInstaller) in $VENV..."
 "$PYTHON" -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet --upgrade mido python-rtmidi pyusb libusb-package pyserial pyinstaller
+"$VENV/bin/pip" install --quiet --upgrade mido python-rtmidi pyusb libusb-package pyserial sv-ttk pyinstaller
 
 build_app() {
     "$VENV/bin/python" -m PyInstaller --noconfirm --windowed --name "$APP_NAME" \
         --osx-bundle-identifier se.noisebud.FM1Switch "$@" \
         --paths "$PROJECT_DIR/tools" --hidden-import mido.backends.rtmidi \
         --hidden-import usb.backend.libusb1 --collect-all libusb_package \
-        --hidden-import serial.tools.list_ports --add-data "$PROJECT_DIR/VERSION:." \
+        --hidden-import serial.tools.list_ports --collect-data sv_ttk --add-data "$PROJECT_DIR/VERSION:." \
         --distpath "$BUILD_DIR/dist" --workpath "$BUILD_DIR/work" --specpath "$BUILD_DIR" \
         "$PROJECT_DIR/tools/fm1_switch.pyw"
 }

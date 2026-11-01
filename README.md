@@ -12,6 +12,14 @@ M-VAVE's M-UPGRADE only takes a firmware with a higher number than the one insta
 takes any Felucca-based package for the FM-1 model, such as Wild, NB303, n001se or FiMba-1, so you
 can go from one to the other and back.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" alt="FM-1 Switch: the FM-1's state on top, the firmware files below, Install" width="600">
+</picture>
+
+It follows the system's dark or light mode (Windows 11's own look, through
+[sv-ttk](https://github.com/rdbende/Sun-Valley-ttk-theme)).
+
 ## Use
 
 1. Put `FM1-Switch.exe` (Windows) or `FM1-Switch.app` (Mac) in a folder. It lists the `.fwsc` files
@@ -101,7 +109,8 @@ universal `FM1-Switch.app` and `FM1Switch_macOS_vX.dmg`. `NOISEBUD_APPLE_SIGN_ID
 `NOISEBUD_APPLE_NOTARY_PROFILE` sign and notarize it. Without them the app is unsigned: the first
 time, right-click it and choose Open.
 
-From source: `pip install -r requirements.txt`, then `python tools/fm1_switch.pyw`. The parts also
+From source: `pip install -r requirements.txt`, then `python tools/fm1_switch.pyw` (without the MIDI
+packages the window says so instead of looking for the FM-1). The parts also
 work on their own from the command line:
 
 ```
