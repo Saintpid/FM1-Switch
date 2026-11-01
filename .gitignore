@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+build-mac-switch/
+FM-1 Rescue/

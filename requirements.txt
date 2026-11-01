@@ -1,0 +1,6 @@
+# FM-1 Switch's Python packages (Python 3.9 or newer; Tk comes with python.org's Python):
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mido>=1.3             # tools/fm1_install.py: talk to the FM-1 over USB-MIDI
+python-rtmidi>=1.5    #   (mido's MIDI backend)
+pyusb>=1.2            # tools/fm1_rescue.py on a Mac or Linux: the chip's own update mode (Windows needs none)
+libusb-package>=1.0   #   (libusb for pyusb, bundled: no brew install needed)
