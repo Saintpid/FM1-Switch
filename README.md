@@ -19,28 +19,33 @@ can go from one to the other and back.
 
 ## A bricked FM-1
 
-Press **Check FM-1**. It watches USB for a few seconds and tells you which state the FM-1 is in:
+Press **Check / unbrick…**. A guide takes you through it in three steps:
 
-| It says | What it means | What to do |
-|---|---|---|
-| runs FM-1_N | the firmware answers (also in Wild's safe mode) | Install |
-| in update mode | an install was cut off, and the FM-1 waits for it | Install any package to finish it |
-| in the chip's own update mode | the firmware does not start (UBOOT, USB 4C4A:8057) | Rescue… |
-| not found | nothing answers | see below |
+1. **It listens to the FM-1** for a few seconds, in every mode it can be in. When the FM-1 answers,
+   that decides what to do, with no questions:
 
-When it is not found, try these in order:
+   | It finds | What it means | The button |
+   |---|---|---|
+   | runs FM-1_N | the firmware answers (also in Wild's safe mode): not bricked | Install |
+   | in update mode | an install was cut off, and the FM-1 waits for it | Finish the install |
+   | the chip's own update mode | the firmware does not start (UBOOT, USB 4C4A:8057) | Try to unbrick |
 
-1. Use a data cable with no hub, switch the FM-1 on, and close other MIDI apps.
-2. If the FM-1 shows a picture but does not answer, hold OCT− and OCT+ for 5 seconds. That is the
-   update mode, and Install works from there.
-3. If the screen stays dark or the FM-1 restarts over and over, press **Rescue…** and switch the
-   FM-1 off and on. A firmware that keeps crashing ends up in the chip's own update mode, and that
-   is where Rescue catches it.
-4. If nothing at all shows on USB, the FM-1 needs an
-   [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter), an RP2040 board wired to
-   the USB lines.
+2. **It asks**, only when nothing answers: what the screen shows (its usual picture, SAFE MODE,
+   UPDATE MODE, dark, or restarting over and over) and what happened last. It keeps listening while
+   you answer, and if the FM-1 turns up, the guide goes on by itself.
+3. **It gives you one thing to try**, step by step, behind one button:
+   - A picture, SAFE MODE or UPDATE MODE means the FM-1 runs but the computer does not hear it. The
+     guide goes through the cable (a data cable, no hub), the port and apps holding the MIDI port,
+     then **Check again**.
+   - A dark screen means: charge it first, because a flat battery looks the same. Then **Try to
+     unbrick**.
+   - Restarting over and over means **Try to unbrick**. A firmware that keeps crashing reaches the
+     chip's own update mode by itself, and the rescue catches it there.
+   - If a rescue never catches it, the guide explains the
+     [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter), an RP2040 board wired to
+     the USB lines that wakes the chip's update mode from outside.
 
-**Rescue…** puts M-VAVE's stock firmware (FM-1 V15) back through the chip's own update mode, with
+**Try to unbrick** (also the **Rescue…** button) puts M-VAVE's stock firmware (FM-1 V15) back through the chip's own update mode, with
 no extra hardware:
 
 - It finds V15 among your `.fwsc` files by its SHA-256, whatever the file is called. If it is not
