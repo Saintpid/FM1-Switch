@@ -45,7 +45,7 @@ jobs:
       # the same build as tools/build_switch_exe.bat
       - run: python -m PyInstaller --noconfirm --onefile --windowed --name FM1-Switch --paths . --hidden-import mido.backends.rtmidi fm1_switch.pyw
         working-directory: tools
-      - name: The .exe starts its rescue part (no device: it reports the missing package and exits)
+      - name: "The .exe starts its rescue part (it reports the missing package and exits)"
         shell: bash
         run: |
           set +e
