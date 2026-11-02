@@ -31,6 +31,23 @@ It follows the system's dark or light mode (Windows 11's own look, through
 2. Connect the FM-1 with a USB data cable, straight into the computer, and close other MIDI apps.
 3. Choose a file and press **Install**. Do not unplug the FM-1 while it writes.
 
+## M-VAVE's SMK-37 keyboards (experimental)
+
+The SMK-37 Pro, SMK-37 Elite, MKE-P37 and Starrykey 37 Play have the FM-1's chip and the same
+update over USB-MIDI. FM-1 Switch hears them and installs a firmware made for that model: M-VAVE's
+own stock file for it (V11 to V16, known by their SHA-256), or a port with Felucca's update loader
+(see [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37)). A firmware for another model is
+refused before anything is sent, so an FM-1 file never goes on a keyboard, nor a keyboard's on an
+FM-1. Check / unbrick… names the keyboard it hears.
+
+Rescue is for the FM-1 only. An SMK-37 in the chip's own update mode (a dark screen, a disk called
+`WL82 UBOOT1.00`) looks like an FM-1 there, so Rescue reads its flash and stops before it writes
+anything when it sees the keyboard's flash part or its factory calibration. The keyboard's
+calibration, Bluetooth pairing and key data (`0xC0000-0xC1FFF`, `0xFF000-0xFFFFF`) are never
+written.
+
+None of this has been tried on a real keyboard yet.
+
 ## A bricked FM-1
 
 Press **Check / unbrick…**. A guide takes you through it in three steps:
@@ -165,7 +182,7 @@ python tools/fm1_rescue.py FM-1.fwsc --via transporter --write           # EXPER
 `tests/run_tests.sh` (or each `python tests/*_test.py`) runs everything against a simulated FM-1,
 with no hardware, no Tk and no MIDI or USB packages:
 
-- `install_test.py`: the USB-MIDI update.
+- `install_test.py`: the USB-MIDI update, M-VAVE's 36-block packages and the SMK-37 keyboards.
 - `switch_test.py`: the window's core, the diagnosis and the command that Rescue runs as
   administrator or root.
 - `export_test.py`: the Mac export's real bytes as Builder takes them (and refuses a backslash, CRLF,
@@ -174,7 +191,7 @@ with no hardware, no Tk and no MIDI or USB packages:
 - `rescue_test.py`: the rescue against a simulated UBOOT (the ROM and JieLi's loader at the level of
   their commands), over USB, over a simulated Windows pass-through and over a simulated
   FM-1-transporter. It covers any firmware with the FM-1's head kept, and refuses one for another
-  chip key.
+  chip key, and an M-VAVE SMK-37 keyboard (before it writes anything).
 
 CI runs them on Linux, Windows and macOS, builds the Windows installer, and makes an unsigned
 development build of the Mac installer.
@@ -186,4 +203,6 @@ GPL-3.0 (see `LICENSE`), with no warranty and no liability (its sections 15 and 
 Instruments). The rescue protocol and write policy come from
 [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter) (MIT) and the X0X firmware's
 `fm1_rescue.py`. The adapter support speaks FM-1-transporter's `fm1t` protocol. The flash loader is from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)
-(MIT). It is downloaded, not included. Not affiliated with M-VAVE or JieLi.
+(MIT). It is downloaded, not included. The SMK-37 facts (its identities, packages and flash map) come
+from [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37), and the stock packages' SHA-256 from
+[smk-37-pro-docs](https://github.com/jonathaslacerda/smk-37-pro-docs). Not affiliated with M-VAVE or JieLi.

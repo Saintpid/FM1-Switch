@@ -88,6 +88,44 @@ except I.InstallError as e:
 dev = T.FakeFM1(b"")
 dev.connected = False
 ok(S.device_text(dev) is None, "no FM-1: none")
+# ---- M-VAVE's SMK-37: its own firmware (stock by SHA-256, ports with the loader), never an FM-1's
+kbd = d / "Firmware SMK"
+kbd.mkdir()
+stock_raw = T.package("SMK-37 Pro_016", marker=False)
+(kbd / "SMK-37_Pro_016.fwsc").write_bytes(stock_raw)
+(kbd / "port.fwsc").write_bytes(T.package("SMK-37 Pro_901"))
+(kbd / "odd.fwsc").write_bytes(T.package("SMK-37 Pro_903", marker=False))
+with patch.dict(I.KEYBOARD_STOCK, {S.R.sha256(stock_raw): "SMK-37 Pro_016"}):
+    kp = S.scan(folders + [kbd], rescue_only=False)
+    ok([(p.product, p.kind, p.family) for p in kp] == [("FM-1_900", "felucca", "NB303"), ("FM-1_846", "felucca", "Wild"),
+                                                        ("SMK-37 Pro_901", "felucca", "SMK-37 Pro"),
+                                                        ("SMK-37 Pro_016", "stock", "M-VAVE")]
+       and S.row_values(kp[3])[3] == "stock",
+       f"scan: SMK-37 port and M-VAVE's stock listed after the FM-1's ({[p.product for p in kp]})")
+    ok(all(p.model == "FM-1" for p in S.rescue_choices(folders + [kbd])[1:]), "rescue choices: FM-1 firmware only")
+    dev = T.FakeFM1(I.logical_image(stock_raw), identity="SMK-37 Pro_901", name="SMK-37 Pro",
+                    after_write="SMK-37 Pro_016")
+    ok(S.install(dev, kp[3], lambda *a: None) == "SMK-37 Pro_016" and dev.bad == 0,
+       "SMK-37 Pro: M-VAVE's stock (no loader) goes back over USB-MIDI")
+    dev = T.FakeFM1(b"", identity="SMK-37 Pro_016", name="SMK-37 Pro")
+    try:
+        S.install(dev, pk[0], lambda *a: None)
+        ok(False, "SMK-37 Pro: an FM-1 firmware is refused, nothing sent")
+    except I.InstallError as e:
+        ok(e.code == "model" and dev.upgrades == 0, "SMK-37 Pro: an FM-1 firmware is refused, nothing sent")
+    dev = T.FakeFM1(b"", identity="FM-1_846")
+    try:
+        S.install(dev, kp[3], lambda *a: None)
+        ok(False, "FM-1: an SMK-37 firmware is refused, nothing sent")
+    except I.InstallError as e:
+        ok(e.code == "model" and dev.upgrades == 0, "FM-1: an SMK-37 firmware is refused, nothing sent")
+dev = T.FakeFM1(b"", identity="SMK-37 Elite_016", name="SMK-37 Elite")
+ok(S.diagnose(dev, lambda: False, 0) == ("running", "SMK-37 Elite_016"), "diagnosis: an SMK-37 Elite is heard")
+h, t = S.advice("running", "SMK-37 Elite_016")
+pl = S.plan("loader", "ota-SMK-37 Elite_016")
+ok(h.startswith("SMK-37 Elite") and "not yet tried" in t and pl.action == "finish" and "SMK-37 Elite" in pl.title
+   and S.keyboard("FM-1_846") is None, "advice and guide: for the keyboard, untried, its own firmware")
+
 # ---- Check FM-1
 dev = T.FakeFM1(b"", identity="FM-1_846")
 ok(S.diagnose(dev, lambda: False, 0) == ("running", "FM-1_846"), "diagnosis: running FM-1_846")

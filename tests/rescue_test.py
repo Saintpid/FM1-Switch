@@ -300,6 +300,26 @@ try:
 except R.Fail as e:
     ok("not the FM-1" in str(e) and not dev.erased, "another flash chip: refused")
 
+# ---- M-VAVE's SMK-37: the FM-1's chip, but never an FM-1 firmware on it
+dev = FakeUboot(now, fid=R.KEYBOARD_FLASH)
+try:
+    R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
+    ok(False, "an SMK-37 (its flash EB6014): refused")
+except R.Fail as e:
+    ok("SMK-37" in str(e) and not dev.erased, "an SMK-37 (its flash EB6014): refused")
+smk = bytearray(now)
+smk[R.TRIM_AT:R.TRIM_AT + 8] = R.TRIM_MARK
+dev = FakeUboot(smk)
+steps = []
+try:
+    R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None, strict_head=False,
+             step=lambda k, v=None: steps.append((k, v)))
+    ok(False, "an SMK-37 with the FM-1's flash part (its calibration): refused, backed up")
+except R.Fail as e:
+    ok("SMK-37" in str(e) and not dev.erased and not dev.writes and steps and steps[0][0] == "backup",
+       "an SMK-37 with the FM-1's flash part (its calibration): refused, backed up")
+    os.remove(steps[0][1])
+
 # ---- any FM-1 firmware: its app area, the FM-1's own head kept; refused for another chip key
 image, now = flashes()
 other = bytearray(image)
