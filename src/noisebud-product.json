@@ -1,0 +1,11 @@
+{
+    "schemaVersion": 1,
+    "releaseVersion": "1.1.0",
+    "manifestRevision": 1,
+    "registration": {
+        "appId": "fm1switch",
+        "productId": "fm1switch",
+        "productName": "FM-1 Switch",
+        "majorVersion": 1
+    }
+}

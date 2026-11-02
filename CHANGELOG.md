@@ -8,6 +8,8 @@ A version is a `VERSION` change with its section below (CI checks the section is
   sharp text on scaled screens. The FM-1's state sits on top with a coloured dot (green: running,
   yellow: update mode, red: a problem), the firmware files are listed in columns, and Install is the
   one blue button.
+- The Mac version can be built in **Noisebud Builder**. The Mac export appears in its list, and the DMG
+  ends up in the setup folder.
 - Run from source without the MIDI packages, the app said "FM-1: not found". Now it says that MIDI is
   missing and how to fix it.
 - **Rescue to any firmware.** Before a rescue starts, you choose what goes back on the FM-1. M-VAVE's

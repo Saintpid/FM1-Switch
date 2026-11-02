@@ -21,6 +21,7 @@ jobs:
       - run: python tests/install_test.py
       - run: python tests/switch_test.py
       - run: python tests/rescue_test.py
+      - run: python tests/builder_test.py
 
   version:
     name: Version

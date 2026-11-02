@@ -1,14 +1,15 @@
 @echo off
 rem FM-1 Switch to the Mac, as the Noisebud apps go: the sources it needs in FM1Switch_mac_ready_vX.zip,
-rem with Build_FM1Switch_Mac.command, in the Mac Export folder that syncs to the Mac. There, double-click
-rem the .command: it builds FM1-Switch.app and its DMG and puts the DMG in the same folder.
+rem with Build_FM1Switch_Mac.command, in the Mac Export folder (SEM) that syncs to the Mac. There, Noisebud
+rem Builder lists the zip (its app flow: FM1Switch/build_mac_app.sh and FM1Switch/src/noisebud-product.json)
+rem and builds it; or double-click the .command. Either makes FM1-Switch.app and its DMG.
 setlocal
 
 set "TOOLS_DIR=%~dp0"
 if "%TOOLS_DIR:~-1%"=="\" set "TOOLS_DIR=%TOOLS_DIR:~0,-1%"
 for %%I in ("%TOOLS_DIR%\..") do set "PROJECT_DIR=%%~fI"
 
-set "PROJECT_NAME=FM1 Switch"
+set "PROJECT_NAME=FM1Switch"
 set "ZIP_SLUG=FM1Switch"
 set "EXPORT_ROOT=C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM"
 set /p VERSION=<"%PROJECT_DIR%\VERSION"
@@ -23,10 +24,14 @@ echo Destination: "%EXPORT_ROOT%"
 
 if exist "%STAGE_ROOT%" rmdir /S /Q "%STAGE_ROOT%"
 mkdir "%STAGE_DIR%\tools" || exit /b 1
+mkdir "%STAGE_DIR%\src" || exit /b 1
 for %%F in (fm1_switch.pyw fm1_install.py fm1_rescue.py build_switch_mac.sh) do (
   copy /Y "%TOOLS_DIR%\%%F" "%STAGE_DIR%\tools\%%F" >nul || (echo ERROR: Could not copy %%F. & exit /b 1)
 )
 copy /Y "%PROJECT_DIR%\VERSION" "%STAGE_DIR%\VERSION" >nul || exit /b 1
+copy /Y "%PROJECT_DIR%\build_mac_app.sh" "%STAGE_DIR%\build_mac_app.sh" >nul || exit /b 1
+copy /Y "%PROJECT_DIR%\src\noisebud-product.json" "%STAGE_DIR%\src\noisebud-product.json" >nul || exit /b 1
+copy /Y "%PROJECT_DIR%\requirements.txt" "%STAGE_DIR%\requirements.txt" >nul || exit /b 1
 copy /Y "%PROJECT_DIR%\LICENSE" "%STAGE_DIR%\LICENSE" >nul || exit /b 1
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%STAGE_DIR%' -DestinationPath '%ZIP_PATH%' -Force"
@@ -50,5 +55,5 @@ if errorlevel 1 (
 
 echo.
 echo Copied "%ZIP_NAME%" and Build_FM1Switch_Mac.command to "%EXPORT_ROOT%".
-echo On the Mac, double-click Build_FM1Switch_Mac.command.
+echo On the Mac: Noisebud Builder lists it (build it there), or double-click Build_FM1Switch_Mac.command.
 exit /b 0

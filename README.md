@@ -103,9 +103,14 @@ Windows: `tools/build_switch_exe.bat` (Python 3 from python.org) makes `tools/di
 CI also builds it on every push, under the Actions run's artifacts (FM1-Switch-windows).
 
 Mac, the same way as the Noisebud apps: `tools/export_switch_mac.cmd` on the PC puts
-`FM1Switch_mac_ready_vX.zip` and `Build_FM1Switch_Mac.command` in the Mac Export folder that syncs to
-the Mac. Double-click the `.command` there. It runs `tools/build_switch_mac.sh`, which makes a
-universal `FM1-Switch.app` and `FM1Switch_macOS_vX.dmg`. `NOISEBUD_APPLE_SIGN_IDENTITY` and
+`FM1Switch_mac_ready_vX.zip` and `Build_FM1Switch_Mac.command` in the Mac Export folder
+(`C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM`), which syncs to the Mac's
+`~/Resilio Sync/SYNK/SEM`. **Noisebud Builder** reads that folder and lists the zip as
+"FM-1 Switch 1.1.0", using its app flow: one `build_mac_app.sh` with `src/noisebud-product.json` beside
+it, whose `releaseVersion` must equal `VERSION` (`tests/builder_test.py` checks the zip the way Builder
+does). Press Build there. Or double-click the `.command` instead. Either way, `build_mac_app.sh` runs
+`tools/build_switch_mac.sh`, which makes a universal `FM1-Switch.app` and `FM1Switch_macOS_vX.dmg`. The
+DMG goes to `dist/` and to the setup folder (`NOISEBUD_SETUP_DEST`, which Builder sets). `NOISEBUD_APPLE_SIGN_IDENTITY` and
 `NOISEBUD_APPLE_NOTARY_PROFILE` sign and notarize it. Without them the app is unsigned: the first
 time, right-click it and choose Open.
 
