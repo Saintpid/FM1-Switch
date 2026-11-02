@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.3.0
+
+- Recovery requires two identical full flash reads and a saved-file readback before writing. Backups have unique names and SHA-256 sidecars.
+- Recovery distinguishes verified flash from confirmed firmware startup over MIDI.
+- Select a MIDI input manually for firmware using an unfamiliar USB port name.
+- Permission preparation is shown before macOS access requests; recovery waits for helper readiness before device instructions. The device timer starts after administrator approval. Stop is disabled while writing and the window stays open during operations.
+
 ## 1.2.3
 
 - Mac DMGs use `/Users/macbook/Desktop/Certificat/Macinstaller.png`, or the

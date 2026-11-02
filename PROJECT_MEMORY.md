@@ -1,5 +1,21 @@
 # FM-1 Switch project memory
 
+## 2026-11-02 — 1.3.0 recovery confidence
+
+Implementation: two matching full reads plus saved-backup readback and SHA-256
+sidecar before writing; unique backup filenames. GUI distinguishes flash
+verification from confirmed running MIDI identity. Explicit MIDI input selection
+supports unfamiliar port names in install/diagnosis/recovery confirmation.
+macOS access preparation precedes MIDI/folder access. Rescue displays system
+approval before launching its helper; the helper signals ready only after
+privilege/dependency checks. Device wait starts after that. Stop is disabled
+during writing, and closing is blocked during an operation.
+
+Tests use simulated devices only. Real Mac permission UX, installed native
+architecture, signed packaging and real-device recovery remain acceptance work.
+Transporter stays experimental; no Flipper/softkey/bootloader/settings writes
+were added. The protected ranges and V15 head policy remain unchanged.
+
 ## 2026-11-02 — 1.2.3, correct Mac-local DMG background
 
 Builder's synced 1.2.2 log showed create-dmg using the exported
