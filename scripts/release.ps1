@@ -90,6 +90,7 @@ try {
         Write-Host "Copying the Mac export to $SemDir"
         Copy-Verified $zip (Join-Path $SemDir $zipName)
         Copy-Verified (Join-Path $root "tools\$macCommand") (Join-Path $SemDir $macCommand)
+        Copy-Verified (Join-Path $root 'builder-flows.json') (Join-Path $SemDir 'FM1Switch_builder-flows.json')
         $newest = Get-ChildItem -LiteralPath $SemDir -Filter 'FM1Switch_mac_ready_v*.zip' |
             Where-Object { $_.BaseName -match '_v\d+\.\d+\.\d+$' } |
             Sort-Object { [version]($_.BaseName -replace '^.*_v', '') } | Select-Object -Last 1

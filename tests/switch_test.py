@@ -10,6 +10,7 @@ import importlib.util
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -42,7 +43,14 @@ nb.write_bytes(T.package("FM-1_900"))
 (d / "Firmware Wild" / "noloader.fwsc").write_bytes(T.package("FM-1_999", marker=False))
 (d / "Firmware Wild" / "notes.txt").write_text("x")
 
-folders = S.default_folders(d)
+# Exercise folder discovery against fixture projects/Downloads only. A developer's
+# real firmware must never change the simulated install targets or test ordering.
+test_home = d / 'test-home'
+(test_home / 'Downloads').mkdir(parents=True)
+with patch.object(S, 'PROJECTS', (d / 'fixture-project',)), patch.object(Path, 'home', return_value=test_home):
+    folders = S.default_folders(d)
+ok(all(p.is_relative_to(d) for p in folders) and test_home / 'Downloads' in folders,
+   'default folders: isolated from real projects and Downloads')
 ok(d / "Firmware Wild" in folders and d / "Firmware NB303" in folders, "default folders: its own and the Firmware ones")
 allpk = S.scan(folders)
 ok([(p.product, p.kind) for p in allpk] == [("FM-1_999", "other"), ("FM-1_900", "felucca"), ("FM-1_846", "felucca")]
