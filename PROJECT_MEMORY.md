@@ -1,5 +1,23 @@
 # FM-1 Switch project memory
 
+## 2026-11-02 — 1.2.1, actual Builder handoff
+
+The user's screenshot still selects the historical 1.1.0 ZIP with backslash
+entries. The checkout already contained the merged 1.2.0 implementation, but
+its new export had not replaced that handoff in the screenshot. Preserve 1.1.0;
+deliver a fresh version and register fm1-switch-source on the Mac.
+
+Running the normative scripts/release.ps1 -SkipWindowsInstaller on the actual
+PC exposed a simulation test reading real firmware from C:/Projects through
+PROJECTS (and potentially Downloads). The test now mocks those discovery roots
+to fixture directories while retaining the same scan/install assertions. App
+and firmware/rescue logic are unchanged. release.ps1 also copies its custom
+flow definition to SEM/FM1Switch_builder-flows.json, size/SHA-256 verified.
+
+This is a Mac source handoff, not a Windows installer rebuild or proof of a
+signed Mac package. Use 1.2.1 after registering its flow; actual Mac compilation,
+signing/notarization, installation and native acceptance remain required.
+
 ## 2026-11-02 — 1.2.0: installers, the custom Builder flow (implementation)
 
 User decision (same day): Windows installers like PER and Pre Flight (Inno Setup), with an EULA

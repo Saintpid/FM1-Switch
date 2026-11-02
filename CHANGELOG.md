@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.2.1
+
+- Mac source delivery now includes the Builder flow definition beside the ZIP
+  and runner. Register its entry in Builder's existing flows.json on the Mac.
+- Release simulation tests use isolated firmware folders instead of reading
+  unrelated firmware from the developer's projects or Downloads.
+
 ## 1.2.0
 
 - **Installers.** Windows gets a setup program (FM-1 Switch Setup 1.2.0.exe) that installs it under
