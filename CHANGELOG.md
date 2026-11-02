@@ -2,6 +2,40 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.2.0
+
+- **Installers.** Windows gets a setup program (FM-1 Switch Setup 1.2.0.exe) that installs it under
+  Program Files\Noisebud with a Start menu entry. The Mac gets a signed and notarized installer
+  package in a DMG that installs FM-1 Switch in Applications. Both show the licence first.
+- **A licence for free software.** FM-1 Switch costs nothing and needs no registration. Using any
+  of its functions is entirely at your own risk: neither the author nor Noisebud takes any
+  responsibility for what happens to your hardware.
+- On a Mac with Apple Silicon, FM-1 Switch and its rescue helper run natively, also when started
+  from an Intel (Rosetta) program. It needs macOS 11 or newer, and the app is universal (Apple
+  Silicon and Intel).
+- The Mac build in Noisebud Builder now uses its own flow for free apps, without a licence manifest.
+
+## 1.1.0
+
+- **A new look.** The window follows your system's dark or light mode in Windows 11's own style, with
+  sharp text on scaled screens. The FM-1's state sits on top with a coloured dot (green: running,
+  yellow: update mode, red: a problem), the firmware files are listed in columns, and Install is the
+  one blue button.
+- Run from source without the MIDI packages, the app said "FM-1: not found". Now it says that MIDI is
+  missing and how to fix it.
+- **Rescue to any firmware.** Before a rescue starts, you choose what goes back on the FM-1. M-VAVE's
+  V15 is chosen first, but any FM-1 firmware file works: Wild, NB303, n001se, FiMba-1, another
+  M-VAVE version, or other people's firmware (Browse…). The firmware's app is written, and the
+  FM-1's own boot part always stays, as in a normal update. A firmware made for another chip is
+  refused before anything is written.
+- **A clear warning:** a rescue starts only after you tick that it is at your own risk. The first
+  time the app starts it shows the disclaimer (also under About…, and in DISCLAIMER.md).
+- **Experimental: rescue through an FM-1-transporter adapter** (an RP2040 board wired to the
+  FM-1's USB lines), for an FM-1 that shows nothing at all on USB. It is in the guide when a rescue
+  never sees the FM-1. It has not been tried on hardware from this app yet.
+- The list shows every FM-1 firmware file. Files without Felucca's updater (V15 and others) are
+  marked "rescue only".
+
 ## 1.0.0
 
 FM-1 Switch in its own repository (it came from Wild's `tools/`).

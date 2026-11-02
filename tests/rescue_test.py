@@ -3,9 +3,11 @@
 """tools/fm1_rescue.py against a simulated FM-1 in the chip's own update mode (UBOOT), no hardware:
 the ROM (memory writes, the jump into the loader) and the loader (key, flash id, erase, write, read)
 at the level of the 16-byte commands, over the USB transport's xfer() and over Windows' SCSI
-pass-through (the struct as Windows reads it, through a fake DeviceIoControl). Checks the write
-policy: a backup of the whole flash first, only the differing sectors in [0x4000, 0x93000), high to
-low, nothing when the head differs or the chip is another one, and the final image.
+pass-through (the struct as Windows reads it, through a fake DeviceIoControl), and through a
+simulated FM-1-transporter (its serial line protocol). Checks the write policy: a backup of the
+whole flash first, only the differing sectors in [0x4000, 0x93000), high to low, nothing for V15 when
+the head differs, nothing when the chip is another one or the firmware is for another chip key, the
+FM-1's own head kept for any other firmware, and the final image.
   python3 tests/rescue_test.py"""
 import ctypes as C
 import os
@@ -13,6 +15,7 @@ import random
 import struct
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +31,7 @@ def ok(cond, what):
     failed += not cond
 
 
-LOADER = bytes(random.Random(1).randrange(256) for _ in range(1500))
+LOADER = bytes(random.Random(1).randrange(256) for _ in range(R.LOADER_SIZE))
 
 
 class FakeUboot:
@@ -135,9 +138,119 @@ class FakeWin32:
         pass
 
 
+def app_head(image, key=0x980F):
+    """a valid app_area_head at 0x4000, as the packer writes it (SFC with the chip key)"""
+    h = bytearray(random.Random(3).randrange(256) for _ in range(32))
+    struct.pack_into("<H", h, 0, R.crc16(bytes(h[2:32])))
+    R.enc(h, key)
+    image[R.WRITE_MIN:R.WRITE_MIN + 32] = h
+
+
+def make_fwsc(flash, product, felucca=False):
+    """an FM-1 package around a flash image: the UFW header and entry list (ENC), the identity marker
+    bytes (the inverse of package_flash_image and product_of)"""
+    files = [(0, flash)] + ([(100, b"FELUCCA-LOADER-1" + bytes(64))] if felucca else [])
+    off, ents = 0x400, []
+    for i, (typ, d) in enumerate(files):
+        off = (off + 0xFF) & ~0xFF
+        e = bytearray(0x50)
+        struct.pack_into("<HHHHII", e, 0, typ, i, R.crc16(d), 0, off, len(d))
+        ents.append((e, off, d))
+        off += len(d)
+    logical = bytearray(b"\xFF" * off)
+    hdr = bytearray(0x40)
+    struct.pack_into("<IH", hdr, 4, off, len(files))
+    hdr[16:22] = b"AC791N"
+    R.enc(hdr)
+    logical[0:0x40] = hdr
+    for i, (e, o, d) in enumerate(ents):
+        R.enc(e)
+        logical[0x40 + i * 0x50:0x40 + (i + 1) * 0x50] = e
+        logical[o:o + len(d)] = d
+    raw = bytearray()
+    for i in range(20):
+        raw += logical[i * 0x2F:(i + 1) * 0x2F] + bytes([(ord(product[i]) + i + 1) & 0xFF if i < len(product) else 0x7D])
+    return bytes(raw + logical[20 * 0x2F:])
+
+
+class FakeTransporter:
+    """the FM-1-transporter's data port: its line protocol over a FakeUboot. state: "uboot", "v15"
+    (stock V15 runs: the soft key moves it to UBOOT) or "off" (no firmware: rekey, then power-on)"""
+
+    def __init__(self, dev, state="uboot"):
+        self.dev, self.state, self.loader = dev, state, False
+        self.out, self.inbuf, self.timeout, self.closed, self.lines = b"", b"", 5, False, []
+
+    def reset_input_buffer(self):
+        self.out = b""
+
+    def write(self, b):
+        self.inbuf += bytes(b)
+        while b"\n" in self.inbuf:
+            line, rest = self.inbuf.split(b"\n", 1)
+            words = line.decode().split()
+            need = {"ldr": lambda w: int(w[2]), "wsec": lambda w: R.SECTOR}.get(words[0], lambda w: 0)(words)
+            if len(rest) < need:
+                return
+            data, self.inbuf = rest[:need], rest[need:]
+            self.lines.append(words[0])
+            self.out += self.answer(words, data)
+
+    def answer(self, w, data):
+        up = self.state == "uboot"
+        if w[0] == "status":
+            return f"OK uboot={int(up)} v15={int(self.state == 'v15')} loader={int(self.loader)}\n".encode()
+        if w[0] == "uboot":
+            self.state = "uboot"
+            return b"OK soft key sent\n"
+        if w[0] == "rekey":
+            self.rekeyed = True
+            return b"OK rebooting\n"
+        if not up:
+            return b"ERR no uboot\n"
+        if w[0] == "ldr":
+            if zlib.crc32(data) & 0xFFFFFFFF != int(w[3], 16):
+                return b"ERR crc\n"
+            self.loader = int(w[1]) + len(data) == R.LOADER_SIZE or self.loader
+            return b"OK\n"
+        if not self.loader:
+            return b"ERR no loader\n"
+        if w[0] == "info":
+            return f"OK key={self.dev.key:04X} type=3 id={self.dev.fid:06X}\n".encode()
+        if w[0] == "read":
+            a, n = int(w[1], 0), int(w[2])
+            d = bytes(self.dev.flash[a:a + n])
+            return f"DATA {n}\n".encode() + d + f"END {zlib.crc32(d) & 0xFFFFFFFF:08X}\n".encode()
+        if w[0] == "wsec":
+            a = int(w[1], 0)
+            if a < R.WRITE_MIN or a >= R.APP_END or zlib.crc32(data) & 0xFFFFFFFF != int(w[2], 16):
+                return b"ERR refused\n"
+            self.dev.erased.append(a)
+            self.dev.writes.append(a)
+            self.dev.flash[a:a + R.SECTOR] = data
+            return b"OK\n"
+        if w[0] == "runapp":
+            self.dev.ran = True
+            return b"OK\n"
+        return b"ERR ?\n"
+
+    def readline(self):
+        i = self.out.find(b"\n")
+        line, self.out = (self.out, b"") if i < 0 else (self.out[:i + 1], self.out[i + 1:])
+        return line
+
+    def read(self, n):
+        d, self.out = self.out[:n], self.out[n:]
+        return d
+
+    def close(self):
+        self.closed = True
+
+
 def flashes():
     rnd = random.Random(7)
     image = bytearray(rnd.randrange(256) for _ in range(R.APP_END))
+    app_head(image)
     now = bytearray(image) + bytes(rnd.randrange(256) for _ in range(R.FLASH_SIZE - R.APP_END))
     for a in (0x5000, 0x6000, 0x40000, 0x92000):                  # the crashing firmware's sectors
         now[a + 17] ^= 0x5A
@@ -186,6 +299,82 @@ try:
     ok(False, "another flash chip: refused")
 except R.Fail as e:
     ok("not the FM-1" in str(e) and not dev.erased, "another flash chip: refused")
+
+# ---- any FM-1 firmware: its app area, the FM-1's own head kept; refused for another chip key
+image, now = flashes()
+other = bytearray(image)
+other[0x100:0x110] = b"another SPL head"                   # a Felucca package's head is the SDK's
+dev = FakeUboot(now)
+R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None, strict_head=False)
+ok(bytes(dev.flash) == now[:R.WRITE_MIN] + image[R.WRITE_MIN:] + now[R.APP_END:] and min(dev.writes) >= R.WRITE_MIN,
+   "any firmware: its app area written, the FM-1's own head kept")
+dev = FakeUboot(now)
+try:
+    R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None)
+    ok(False, "V15 (strict head): a different head is still refused")
+except R.Fail:
+    ok(not dev.erased, "V15 (strict head): a different head is still refused")
+wrongkey = bytearray(image)
+app_head(wrongkey, key=0x1234)
+dev = FakeUboot(now)
+try:
+    R.rescue(R.Uboot(dev), bytes(wrongkey), LOADER, True, tmp, say=lambda *a, **k: None, strict_head=False)
+    ok(False, "a firmware for another chip key: refused")
+except R.Fail as e:
+    ok("not for this chip" in str(e) and not dev.erased, "a firmware for another chip key: refused")
+for kind, fel in (("felucca", True), ("other", False)):
+    pth = os.path.join(tmp, f"{kind}.fwsc")
+    open(pth, "wb").write(make_fwsc(image + bytes(64), "FM-1_846", fel))
+    got = R.load_package(pth)
+    ok(got[0] == image and got[1:] == (kind, "FM-1_846"), f"load_package: an FM-1 package, {kind}")
+pth = os.path.join(tmp, "x.fwsc")
+open(pth, "wb").write(make_fwsc(image, "XYZ-2_5"))
+try:
+    R.load_package(pth)
+    ok(False, "load_package: another model refused")
+except R.Fail:
+    ok(True, "load_package: another model refused")
+real = Path("/mnt/project-files/wild-firmware/Wild-0.3.11.fwsc")
+if real.exists():                                          # a real Wild package (on the author's setup)
+    im, k, prod = R.load_package(str(real))
+    ok(k == "felucca" and prod == "FM-1_845" and R.app_key_ok(im, 0x980F) and not R.app_key_ok(im, 0x1234),
+       "a real Wild package: Felucca, FM-1_845, the FM-1's chip key")
+
+# ---- EXPERIMENTAL: through an FM-1-transporter (its serial protocol)
+for state in ("uboot", "v15", "off"):
+    image, now = flashes()
+    dev = FakeUboot(now)
+    port = FakeTransporter(dev, state)
+    reopened = []
+
+    def reopen(port=port):
+        reopened.append(1)
+        if len(reopened) < 3:                              # the adapter restarting: not there yet
+            return None
+        port.state = "uboot"                               # the FM-1 switched on: USB_KEY caught it
+        return port
+    t = R.Transporter(port, reopen=reopen)
+    t.ensure_uboot(5, say=lambda *a, **k: None)
+    done = R.rescue(t, image, LOADER, True, tmp, say=lambda *a, **k: None)
+    ok(done and bytes(dev.flash) == image + now[R.APP_END:] and dev.erased == [0x92000, 0x40000, 0x6000, 0x5000]
+       and dev.ran and port.lines.count("ldr") == R.LOADER_SIZE // 4096 + 1,
+       f"transporter ({state}): loader, info, read, the 4 sectors high to low, runapp")
+    ok(("rekey" in port.lines) == (state == "off") and ("uboot" in port.lines) == (state == "v15"),
+       f"transporter ({state}): " + {"uboot": "already there", "v15": "V15's soft key",
+                                     "off": "rekey, then the FM-1's power-on"}[state])
+port = FakeTransporter(FakeUboot(now), "off")
+try:
+    R.Transporter(port).ensure_uboot(0.3, say=lambda *a, **k: None)
+    ok(False, "transporter: it never shows up: a clear failure")
+except R.Fail as e:
+    ok("did not appear" in str(e), "transporter: it never shows up: a clear failure")
+try:
+    R.Transporter(FakeTransporter(FakeUboot(now))).write_sector(0x1000, bytes(R.SECTOR))
+    ok(False, "transporter: a sector below 0x4000 refused here too")
+except R.Fail:
+    ok(True, "transporter: a sector below 0x4000 refused here too")
+ok(R.find_transporter(["COM7", "COM9"], lambda p: None if p == "COM7" else "port9") == "port9",
+   "transporter: the port that answers ping")
 
 # ---- finding it on Windows without an administrator: by the disk's vendor and product
 ok(R.windows_uboot_disks(FakeWin32(FakeUboot(now))) == [r"\\.\PhysicalDrive2"],

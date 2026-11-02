@@ -8,7 +8,7 @@ set -u
 cd "$(dirname "$0")/.."
 PY="${PYTHON:-python3}"
 FAIL=0
-for t in install switch rescue; do
+for t in install switch rescue export; do
     if "$PY" "tests/${t}_test.py" > "/tmp/fm1-switch-$t.log" 2>&1 || { cat "/tmp/fm1-switch-$t.log"; false; }; then
         echo "  ok   $t"
     else
