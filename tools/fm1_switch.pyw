@@ -161,6 +161,11 @@ STEP_TEXT = {"start": "Starting the update on {}", "check": "Checking the packag
              "done": "Done: the FM-1 runs {}"}
 
 
+def later(after, f, *a, **kw):
+    """f(*a, **kw) on Tk's thread (after() itself passes no keywords: bar.configure(value=...))"""
+    after(0, lambda: f(*a, **kw))
+
+
 def step_text(kind, value=None):
     return STEP_TEXT[kind].format(value if value is not None else "")
 
@@ -656,8 +661,8 @@ def main():
         dark_titlebar(d, dark)
         return d
 
-    def ui(f, *a):
-        root.after(0, f, *a)
+    def ui(f, *a, **kw):
+        later(root.after, f, *a, **kw)
 
     def refresh():
         state["pkgs"] = scan(folders)
