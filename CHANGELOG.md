@@ -2,6 +2,22 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.3.0
+
+- Recovery requires two identical full flash reads and a saved-file readback before writing. Backups have unique names and SHA-256 sidecars.
+- Recovery distinguishes verified flash from confirmed firmware startup over MIDI.
+- Select a MIDI input manually for firmware using an unfamiliar USB port name.
+- Permission preparation is shown before macOS access requests; recovery waits for helper readiness before device instructions. The device timer starts after administrator approval. Stop is disabled while writing and the window stays open during operations.
+
+## 1.2.3
+
+- Mac DMGs use `/Users/macbook/Desktop/Certificat/Macinstaller.png`, or the
+  image explicitly selected by Noisebud Builder through `NOISEBUD_DMG_BACKGROUND`.
+  A missing or invalid image stops before compilation/signing; the exported
+  sample image is no longer silently used for releases.
+- The CI-only unsigned development build selects its bundled test fixture
+  explicitly. Firmware, USB, rescue and installer identity behavior is unchanged.
+
 ## 1.2.2
 
 - **Install works again.** Installing a firmware stopped right at the start with "got an unexpected

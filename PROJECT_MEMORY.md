@@ -1,5 +1,33 @@
 # FM-1 Switch project memory
 
+## 2026-11-02 — 1.3.0 recovery confidence
+
+Implementation: two matching full reads plus saved-backup readback and SHA-256
+sidecar before writing; unique backup filenames. GUI distinguishes flash
+verification from confirmed running MIDI identity. Explicit MIDI input selection
+supports unfamiliar port names in install/diagnosis/recovery confirmation.
+macOS access preparation precedes MIDI/folder access. Rescue displays system
+approval before launching its helper; the helper signals ready only after
+privilege/dependency checks. Device wait starts after that. Stop is disabled
+during writing, and closing is blocked during an operation.
+
+Tests use simulated devices only. Real Mac permission UX, installed native
+architecture, signed packaging and real-device recovery remain acceptance work.
+Transporter stays experimental; no Flipper/softkey/bootloader/settings writes
+were added. The protected ranges and V15 head policy remain unchanged.
+
+## 2026-11-02 — 1.2.3, correct Mac-local DMG background
+
+Builder's synced 1.2.2 log showed create-dmg using the exported
+mac/assets/MacInstaller.png. The user requires
+/Users/macbook/Desktop/Certificat/Macinstaller.png. The release script now
+honors NOISEBUD_DMG_BACKGROUND, with that exact Mac-local default. Missing or
+non-PNG input stops before compilation/signing; no bundled fallback. CI's
+unpublished unsigned build explicitly selects its test fixture. Simulation
+tests cover selection, missing/invalid/default failures and the actual
+create-dmg argument. Shared pinned snapshots and all firmware code are unchanged.
+Actual signed Mac packaging/visual/native acceptance of 1.2.3 remains pending.
+
 ## 2026-11-02 — 1.2.1, actual Builder handoff
 
 The user's screenshot still selects the historical 1.1.0 ZIP with backslash
