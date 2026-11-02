@@ -187,5 +187,12 @@ ok([S.row_values(p) for p in allpk] == [("?", "noloader", "FM-1_999", "rescue on
                                         ("NB303", "NB303-0.1.0", "FM-1_900", ""), ("Wild", "Wild-0.3.12", "FM-1_846", "")],
    "list columns: family, file, identity, rescue only")
 
+# ---- the window's thread hop: keywords too (the progress bar is bar.configure(value=...))
+queued, got = [], {}
+S.later(lambda ms, f, *a: queued.append((ms, f, a)), lambda *a, **kw: got.update(a=a, kw=kw), "x", value=42)
+for ms, f, a in queued:
+    f(*a)
+ok(len(queued) == 1 and got == {"a": ("x",), "kw": {"value": 42}}, "window: a call with keywords reaches Tk's thread")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

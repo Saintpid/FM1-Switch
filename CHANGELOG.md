@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.2.2
+
+- **Install works again.** Installing a firmware stopped right at the start with "got an unexpected
+  keyword argument 'value'" (the progress bar's update). The same fault hit Rescue's progress bar. If
+  an install stopped this way, the FM-1 waits in its update mode: install the firmware again and it
+  finishes.
+
 ## 1.2.1
 
 - Mac source delivery now includes the Builder flow definition beside the ZIP
