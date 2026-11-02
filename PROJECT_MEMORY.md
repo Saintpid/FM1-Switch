@@ -1,5 +1,13 @@
 # FM-1 Switch project memory
 
+## 2026-11-02 — Distribution decision
+
+GitHub is for source code; ready-made installers are distributed through Patreon.
+Do not commit compiled applications/installers or upload GitHub Release assets
+or Actions artifacts containing them. CI retains build verification but its
+installer/DMG upload steps have been removed. This is distribution configuration
+and documentation, with no new built product version claimed.
+
 ## 2026-11-02 — 1.3.0 recovery confidence
 
 Implementation: two matching full reads plus saved-backup readback and SHA-256
