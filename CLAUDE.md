@@ -10,5 +10,6 @@
 - The FM-1-transporter path (`--via transporter`) is experimental until tried on hardware: say so
   wherever it shows.
 - Tests: `tests/run_tests.sh` (simulated FM-1). Add a check for anything new and make sure it can fail.
-- Texts in English. Branch from `main`, PR, CI green. Bump `VERSION` and add its `## X.Y.Z` section to
+- Texts in English. Branch from `main`, PR, CI green. Bump `VERSION` (and `releaseVersion` in
+  `src/noisebud-product.json`, which Noisebud Builder reads) and add its `## X.Y.Z` section to
   `CHANGELOG.md` for a change a user would notice.
