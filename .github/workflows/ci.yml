@@ -56,10 +56,7 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       # the same build as a release (scripts/release.ps1 runs it); unsigned here
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-installer.ps1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FM-1-Switch-Setup-windows
-          path: build/win/FM-1 Switch Setup *.exe
+      # Verify the build only. Installer distribution is through Patreon.
 
   mac-dev-build:
     name: Mac build (unsigned development)
@@ -81,7 +78,4 @@ jobs:
           # Explicit test fixture for an UNPUBLISHED unsigned development DMG.
           # Release builds require the selected Mac-local Certificat image.
           NOISEBUD_DMG_BACKGROUND: ${{ github.workspace }}/mac/assets/MacInstaller.png
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FM1Switch-macOS-UNSIGNED-DEV
-          path: dist-dev/*.dmg
+      # Verify the build only; do not upload a downloadable DMG to GitHub.

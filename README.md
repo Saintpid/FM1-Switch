@@ -22,6 +22,10 @@ It follows the system's dark or light mode (Windows 11's own look, through
 
 ## Use
 
+Ready-made installers are distributed through [Noisebud on Patreon](https://www.patreon.com/Noisebud).
+GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
+uploading installers or application binaries.
+
 ### Recovery and access in 1.3.0
 
 On macOS, access preparation explains the MIDI and folder requests before they
