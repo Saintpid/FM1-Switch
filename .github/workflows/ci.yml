@@ -77,6 +77,10 @@ jobs:
       # The whole Mac build as a release runs it, but ad hoc signed and not notarized: universal wheels,
       # PyInstaller universal2, both slices and macOS 11.0 in every Mach-O, native probes, PKG, DMG.
       - run: bash build_fm1_mac.sh --unsigned-dev
+        env:
+          # Explicit test fixture for an UNPUBLISHED unsigned development DMG.
+          # Release builds require the selected Mac-local Certificat image.
+          NOISEBUD_DMG_BACKGROUND: ${{ github.workspace }}/mac/assets/MacInstaller.png
       - uses: actions/upload-artifact@v4
         with:
           name: FM1Switch-macOS-UNSIGNED-DEV
