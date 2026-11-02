@@ -22,10 +22,12 @@ It follows the system's dark or light mode (Windows 11's own look, through
 
 ## Use
 
-1. Put `FM1-Switch.exe` (Windows) or `FM1-Switch.app` (Mac) in a folder. It lists the `.fwsc` files
-   in its own folder, in `Firmware Wild`, `Firmware NB303`, `Firmware n001se` and `Firmware
-   Original` beside it, and in Downloads. **Add folder…** adds more. The highest number is listed
-   first.
+1. Install it: **FM-1 Switch Setup X.Y.Z.exe** on Windows (it installs in Program Files\Noisebud),
+   or open **FM1Switch_macOS_vX.Y.Z.dmg** on the Mac and run the installer in it (it installs in
+   Applications). Both show the licence first: free software, at your own risk. It lists the `.fwsc`
+   files in `Firmware Wild`, `Firmware NB303`, `Firmware n001se` and `Firmware Original` under
+   `C:\Projects\M-Vave FM1 n001se` (`~/M-Vave FM1 n001se` on a Mac), beside the program, and in
+   Downloads. **Add folder…** adds more. The highest number is listed first.
 2. Connect the FM-1 with a USB data cable, straight into the computer, and close other MIDI apps.
 3. Choose a file and press **Install**. Do not unplug the FM-1 while it writes.
 
@@ -99,20 +101,50 @@ Installing firmware is at your own risk.
 
 ## Build
 
-Windows: `tools/build_switch_exe.bat` (Python 3 from python.org) makes `tools/dist/FM1-Switch.exe`.
-CI also builds it on every push, under the Actions run's artifacts (FM1-Switch-windows).
+The installers are made the way the Noisebud apps (Pre Flight, PER) are, but FM-1 Switch is free
+software: no registration, no Noisebud licence manifest. Its licence page is
+[installer/EULA.txt](installer/EULA.txt): GPL-3.0, no warranty, and no responsibility at all for
+anyone's hardware.
 
-Mac, the same way as the Noisebud apps: `tools/export_switch_mac.cmd` on the PC puts
-`FM1Switch_mac_ready_vX.zip` and `Build_FM1Switch_Mac.command` in the Mac Export folder
-(`C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM`), which syncs to the Mac's
-`~/Resilio Sync/SYNK/SEM`. **Noisebud Builder** reads that folder and lists the zip as
-"FM-1 Switch 1.1.0", using its app flow: one `build_mac_app.sh` with `src/noisebud-product.json` beside
-it, whose `releaseVersion` must equal `VERSION` (`tests/builder_test.py` checks the zip the way Builder
-does). Press Build there. Or double-click the `.command` instead. Either way, `build_mac_app.sh` runs
-`tools/build_switch_mac.sh`, which makes a universal `FM1-Switch.app` and `FM1Switch_macOS_vX.dmg`. The
-DMG goes to `dist/` and to the setup folder (`NOISEBUD_SETUP_DEST`, which Builder sets). `NOISEBUD_APPLE_SIGN_IDENTITY` and
-`NOISEBUD_APPLE_NOTARY_PROFILE` sign and notarize it. Without them the app is unsigned: the first
-time, right-click it and choose Open.
+**Windows**, `scripts\release.ps1` (Python 3.12 and Inno Setup 6), from a committed tree:
+
+1. checks VERSION and its CHANGELOG section, runs the simulated tests;
+2. `scripts\build-installer.ps1`: PyInstaller makes the app, Inno Setup wraps it with the licence
+   (signed when `NOISEBUD_WINDOWS_CERT_THUMBPRINT` is set), and the installer is copied to
+   `D:\Dropbox\SynthEdit\000 Klara pluggar 000\--- Nya Setupfiler`, checked by SHA-256;
+3. the Mac handoff: `tools\export_mac.py` writes `exports\FM1Switch_mac_ready_vX.Y.Z.zip` from the
+   committed files (portable paths, LF, shell scripts executable; an existing export is never
+   rewritten), Noisebud Builder's `check_export.py` must say `EXPORT OK` with this project's flow
+   ([builder-flows.json](builder-flows.json)), and the ZIP and `Build_FM1Switch_Mac.command` are
+   copied to `C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM` (synced to the Mac's
+   `~/Resilio Sync/SYNK/SEM`) with `cmd copy`, size and SHA-256 checked. The shared signing and native
+   runtime copies in `mac/` must match their upstream files in `C:\Projects` (`mac/SOURCE_HASHES.json`).
+
+**Mac**, in Noisebud Builder: register [builder-flows.json](builder-flows.json) once (merge its entry
+into Builder's `flows.json`; keep the other flows). The export then shows as "FM-1 Switch · free
+app" (flow `fm1-switch-source`, chosen by `FM1Switch/FM1SWITCH_BUILD_FLOW.txt`). Build it there, or
+double-click `Build_FM1Switch_Mac.command` in SEM: it takes the highest-numbered export beside it,
+unpacks it into `~/Library/Caches/NoisebudBuildTools` (never in the synced folder) and plays Glass or
+Basso at the end. Both run `build_fm1_mac.sh` → [mac/build_release.py](mac/build_release.py), which needs
+python.org's universal2 Python 3.12 and Xcode's tools:
+
+- the build tools run native (a Rosetta shell restarts as arm64); the simulated tests run first;
+- python-rtmidi and libusb-package have no universal2 wheels, so their arm64 and x86_64 wheels are
+  joined with `delocate-merge`; PyInstaller then makes a universal2 `FM-1 Switch.app`;
+- every Mach-O file must have both slices and need macOS 11.0 at most, before anything is signed; a
+  missing slice stops the build (there is no single-architecture fallback);
+- Developer ID signing with the shared Noisebud runtime (`mac/signing`, G2 certificates by SHA-1),
+  inside out, then the signature tree and the native process probes (`--native-process-probe`, also
+  under an x86_64 parent on Apple Silicon);
+- a PKG installer (licence, welcome and conclusion pages; installs in Applications), signed with
+  Developer ID Installer and notarized, inside a DMG with the Noisebud installer look, signed and
+  notarized: `dist/FM1Switch_macOS_vX.Y.Z.dmg`, also copied to `NOISEBUD_SETUP_DEST` (Builder sets
+  it) or the setup folder from `~/Desktop/Certificat/ID_and_paths.txt`, SHA-256 checked.
+
+A release stops when an identity, the notary profile or any check is missing.
+`build_fm1_mac.sh --unsigned-dev` makes a local, ad hoc signed test build in `dist-dev/` that is never
+published; CI runs that on every push. `EXPORT OK` and a green CI are not the signed Mac release:
+that is checked on the Mac (see [docs/MAC_RELEASE.md](docs/MAC_RELEASE.md)).
 
 From source: `pip install -r requirements.txt`, then `python tools/fm1_switch.pyw` (without the MIDI
 packages the window says so instead of looking for the FM-1). The parts also
@@ -136,12 +168,16 @@ with no hardware, no Tk and no MIDI or USB packages:
 - `install_test.py`: the USB-MIDI update.
 - `switch_test.py`: the window's core, the diagnosis and the command that Rescue runs as
   administrator or root.
+- `export_test.py`: the Mac export's real bytes as Builder takes them (and refuses a backslash, CRLF,
+  a BOM, a missing entrypoint or a licence manifest), the runner's choice of export, the exported
+  helpers from a fresh interpreter, the shared runtime's pins, and the Mac build's release rules.
 - `rescue_test.py`: the rescue against a simulated UBOOT (the ROM and JieLi's loader at the level of
   their commands), over USB, over a simulated Windows pass-through and over a simulated
   FM-1-transporter. It covers any firmware with the FM-1's head kept, and refuses one for another
   chip key.
 
-CI runs them on Linux, Windows and macOS.
+CI runs them on Linux, Windows and macOS, builds the Windows installer, and makes an unsigned
+development build of the Mac installer.
 
 ## Credits and licence
 

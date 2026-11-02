@@ -388,11 +388,49 @@ def accept(d):
         pass
 
 
-def helper_command(args):
-    """this program with --rescue: the .exe / the .app itself, or Python with this script"""
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--rescue", *args]
-    return [sys.executable, str(Path(__file__).resolve()), "--rescue", *args]
+def _sysctl_int(name):
+    """a Mac sysctl integer (hw.optional.arm64, sysctl.proc_translated), or None"""
+    try:
+        import ctypes
+        import ctypes.util
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        v, n = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
+        if libc.sysctlbyname(name.encode(), ctypes.byref(v), ctypes.byref(n), None, ctypes.c_size_t(0)) != 0:
+            return None
+        return v.value
+    except (OSError, AttributeError):
+        return None
+
+
+def mac_hardware_arch(sysctl=_sysctl_int):
+    """the Mac's own CPU, also when this process runs under Rosetta: arm64 or x86_64"""
+    return "arm64" if sysctl("hw.optional.arm64") == 1 else "x86_64"
+
+
+def native_prefix(platform=sys.platform, sysctl=_sysctl_int):
+    """on a Mac, /usr/bin/arch with the hardware's own slice: the rescue helper runs native even when the
+    window was started translated (a universal app otherwise inherits its parent's choice)"""
+    if platform != "darwin":
+        return []
+    return ["/usr/bin/arch", "-" + mac_hardware_arch(sysctl)]
+
+
+def native_probe(sysctl=_sysctl_int):
+    """--native-process-probe, for the Mac release gate (verify_native_mac.py): what this process is"""
+    import platform as P
+    hw = mac_hardware_arch(sysctl)
+    arch = {"aarch64": "arm64", "amd64": "x86_64"}.get(P.machine().lower(), P.machine())
+    translated = sysctl("sysctl.proc_translated") == 1
+    return {"product": "FM-1 Switch", "version": app_version(), "executable": sys.executable,
+            "pid": os.getpid(), "architecture": arch, "hardwareArchitecture": hw,
+            "translated": translated, "native": arch == hw and not translated}
+
+
+def helper_command(args, platform=sys.platform, sysctl=_sysctl_int):
+    """this program with --rescue: the .exe / the .app itself, or Python with this script; on a Mac
+    started with the hardware's own architecture"""
+    me = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(Path(__file__).resolve())]
+    return native_prefix(platform, sysctl) + me + ["--rescue", *args]
 
 
 def rescue_args(target, d, progress, any_firmware=False, via="usb"):
@@ -1017,7 +1055,23 @@ def rescue_main(argv):
     return R.main(argv)
 
 
+def reexec_native(platform=sys.platform, frozen=None, sysctl=_sysctl_int, env=os.environ, execv=os.execv):
+    """the Mac app started translated (an x86_64 parent, Open using Rosetta) starts itself again with the
+    hardware's own slice; once (FM1_SWITCH_NATIVE), and only the built app (a script follows its Python)"""
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if platform != "darwin" or not frozen or env.get("FM1_SWITCH_NATIVE") or sysctl("sysctl.proc_translated") != 1:
+        return False
+    env["FM1_SWITCH_NATIVE"] = "1"
+    execv("/usr/bin/arch", ["/usr/bin/arch", "-" + mac_hardware_arch(sysctl), sys.executable, *sys.argv[1:]])
+    return True
+
+
 if __name__ == "__main__":
+    reexec_native()
+    if len(sys.argv) > 1 and sys.argv[1] == "--native-process-probe":
+        import json
+        print(json.dumps(native_probe()))
+        sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "--rescue":
         sys.exit(rescue_main(sys.argv[2:]))
     main()

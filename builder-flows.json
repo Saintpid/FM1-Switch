@@ -1,0 +1,13 @@
+[
+  {
+    "id": "fm1-switch-source",
+    "name": "FM-1 Switch · free app",
+    "kind": "custom",
+    "revision": 1,
+    "marker": "FM1Switch/FM1SWITCH_BUILD_FLOW.txt",
+    "entrypoint": "FM1Switch/build_fm1_mac.sh",
+    "arguments": [],
+    "environment": {},
+    "outputGlobs": ["FM1Switch/dist/FM1Switch_macOS_v*.dmg"]
+  }
+]

@@ -124,9 +124,35 @@ ok(not S.accepted(rd) and (S.accept(rd) or S.accepted(rd)) and "OWN RISK" in S.D
 a = S.rescue_args(rd / "FM-1-V15.fwsc", rd, "/tmp/p.jsonl")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
    and a[a.index("--backup-dir") + 1] == str(rd), "rescue: V15, --write, the backup folder, the progress file")
-cmd = S.helper_command(a)
+cmd = S.helper_command(a, "win32")
 ok(cmd[0] == sys.executable and cmd[1].endswith("fm1_switch.pyw") and cmd[2] == "--rescue" and cmd[3:] == a,
    "rescue: this program again, with --rescue")
+
+
+def silicon(translated):
+    return lambda name: {"hw.optional.arm64": 1, "sysctl.proc_translated": int(translated)}.get(name)
+
+
+def intel(name):
+    return None                         # (an Intel Mac has neither sysctl)
+
+
+mac_cmd = S.helper_command(a, "darwin", silicon(True))
+ok(mac_cmd[:2] == ["/usr/bin/arch", "-arm64"] and mac_cmd[2:] == cmd,
+   "Mac: the rescue helper starts arm64 on Apple Silicon, also from a translated window")
+ok(S.helper_command(a, "darwin", intel)[:2] == ["/usr/bin/arch", "-x86_64"], "Mac: x86_64 on an Intel Mac")
+calls = []
+env = {}
+ok(S.reexec_native("darwin", True, silicon(True), env, lambda *a: calls.append(a)) and calls
+   and calls[0][1][:2] == ["/usr/bin/arch", "-arm64"] and env.get("FM1_SWITCH_NATIVE") == "1"
+   and not S.reexec_native("darwin", True, silicon(True), env, lambda *a: calls.append(a)) and len(calls) == 1,
+   "Mac: started translated, the app restarts itself arm64 (once)")
+ok(not S.reexec_native("darwin", True, silicon(False), {}, lambda *a: calls.append(a))
+   and not S.reexec_native("win32", True, silicon(True), {}, lambda *a: calls.append(a)) and len(calls) == 1,
+   "Mac: native already, or not a Mac: no restart")
+pr = S.native_probe(silicon(False))
+ok(pr["hardwareArchitecture"] == "arm64" and {"native", "translated", "architecture", "executable", "pid"} <= set(pr)
+   and S.native_probe(silicon(True))["native"] is False, "native probe: hardware, translation, what verify_native_mac reads")
 osa = S.applescript_admin(["/Apps/FM 1/x", 'a"b', "c\\d"])
 ok(osa == 'do shell script "\'/Apps/FM 1/x\' \'a\\"b\' \'c\\\\d\'" with administrator privileges',
    f"rescue on a Mac: one quoted shell line for osascript ({osa})")

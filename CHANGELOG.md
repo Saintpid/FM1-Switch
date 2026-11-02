@@ -2,14 +2,25 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.2.0
+
+- **Installers.** Windows gets a setup program (FM-1 Switch Setup 1.2.0.exe) that installs it under
+  Program Files\Noisebud with a Start menu entry. The Mac gets a signed and notarized installer
+  package in a DMG that installs FM-1 Switch in Applications. Both show the licence first.
+- **A licence for free software.** FM-1 Switch costs nothing and needs no registration. Using any
+  of its functions is entirely at your own risk: neither the author nor Noisebud takes any
+  responsibility for what happens to your hardware.
+- On a Mac with Apple Silicon, FM-1 Switch and its rescue helper run natively, also when started
+  from an Intel (Rosetta) program. It needs macOS 11 or newer, and the app is universal (Apple
+  Silicon and Intel).
+- The Mac build in Noisebud Builder now uses its own flow for free apps, without a licence manifest.
+
 ## 1.1.0
 
 - **A new look.** The window follows your system's dark or light mode in Windows 11's own style, with
   sharp text on scaled screens. The FM-1's state sits on top with a coloured dot (green: running,
   yellow: update mode, red: a problem), the firmware files are listed in columns, and Install is the
   one blue button.
-- The Mac version can be built in **Noisebud Builder**. The Mac export appears in its list, and the DMG
-  ends up in the setup folder.
 - Run from source without the MIDI packages, the app said "FM-1: not found". Now it says that MIDI is
   missing and how to fix it.
 - **Rescue to any firmware.** Before a rescue starts, you choose what goes back on the FM-1. M-VAVE's

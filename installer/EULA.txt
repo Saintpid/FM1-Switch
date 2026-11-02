@@ -1,0 +1,46 @@
+FM-1 SWITCH - LICENSE AND DISCLAIMER
+
+Please read this before installing. By installing or using FM-1 Switch you accept it.
+
+1. FREE AND OPEN SOURCE
+
+FM-1 Switch is free software. It costs nothing, needs no registration or activation, and its
+source code is published under the GNU General Public License, version 3 (GPL-3.0). You may use,
+copy, change and share it under that licence. The full licence text is installed with the program
+(LICENSE) and is at https://www.gnu.org/licenses/gpl-3.0.html. The source code is at
+https://github.com/Saintpid/FM1-Switch.
+
+2. EVERYTHING IS AT YOUR OWN RISK
+
+FM-1 Switch writes firmware to hardware. Every function of the program - checking a device,
+installing a firmware, the rescue through the chip's own update mode, the experimental adapter
+path and anything else it does - is used entirely at your own risk. Writing firmware can fail and
+can leave your FM-1, or any other device, permanently unusable ("bricked"). It can also affect
+your computer, its files and anything connected to it.
+
+3. NO WARRANTY
+
+The program is provided "as is", without warranty of any kind, express or implied, including but
+not limited to the warranties of merchantability, fitness for a particular purpose and
+non-infringement. There is no promise that it works, that it is free of errors, or that it can
+repair a device.
+
+4. NO LIABILITY
+
+Neither the author nor Noisebud, nor anyone who has contributed to FM-1 Switch, takes any
+responsibility whatsoever for what happens to your hardware, your computer, your data or anything
+else when you use any of the program's functions. To the fullest extent permitted by law, none of
+them is liable for any damage or loss of any kind - direct, indirect, incidental or consequential,
+including a damaged or destroyed device, lost data, lost work or lost income - however it is
+caused, even if they were told that such damage was possible. This applies together with sections
+15 (Disclaimer of Warranty) and 16 (Limitation of Liability) of the GPL-3.0.
+
+5. NOT M-VAVE OR JIELI
+
+FM-1 Switch is not made, approved or supported by M-VAVE or JieLi. M-VAVE and FM-1 are their
+names; they are used here only to say which device the program is for. Using it may affect your
+device's warranty with its maker.
+
+6. IF YOU DO NOT AGREE
+
+Do not install or use FM-1 Switch.

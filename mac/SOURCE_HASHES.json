@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "imported": "2026-11-02",
+  "note": "Byte-identical copies. Update from upstream (never patch here) and change these hashes together; tests/export_test.py checks them, release.ps1 compares them with the canonical files.",
+  "files": {
+    "mac/signing/noisebud_signing.py": {
+      "sha256": "930a965a08a26419d9bb296fd030ad300bb229693600cbcbe3c15b72d013aa50",
+      "source": "C:/Projects/Noisebud Mac Signing/noisebud_signing.py (runtime 1.0.1)"
+    },
+    "mac/signing/noisebud-signing.json": {
+      "sha256": "c8605b1fa5203685f3b12c6db5dc4305872554cf23c72bb76f9e2bee1ad4e5e6",
+      "source": "C:/Projects/Noisebud Mac Signing/noisebud-signing.json"
+    },
+    "mac/noisebud-mac/package_common.py": {
+      "sha256": "ca320dba56e0697cd8ff88837ac94fa2d9e82741c7cf0892595c5a26a07fad83",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py (same bytes as PER scripts/noisebud-mac)"
+    },
+    "mac/noisebud-mac/verify_native_mac.py": {
+      "sha256": "8f5e99906d66e48baac1347c7091184d394079e52cba3e861a86c78e31924197",
+      "source": "C:/Projects/Per/scripts/noisebud-mac/verify_native_mac.py (PER's colocated app-consumer snapshot)"
+    },
+    "mac/assets/MacInstaller.png": {
+      "sha256": "37aa521d6aa47a292def3a4418079bd81847681d3e2da8ab50b6da5df2755766",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/assets/MacInstaller.png"
+    },
+    "mac/assets/Noisebud.icns": {
+      "sha256": "e78a03c68f18360d4ff51f783b6e81b1c338140a066f55d003f65f728542a250",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/assets/Noisebud.icns"
+    }
+  }
+}

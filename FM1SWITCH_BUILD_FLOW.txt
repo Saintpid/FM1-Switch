@@ -1,0 +1,4 @@
+FM-1 Switch Mac build flow, revision 1.
+Noisebud Builder's custom flow "fm1-switch-source" (builder-flows.json) is chosen by this marker and
+runs FM1Switch/build_fm1_mac.sh. FM-1 Switch is free software (GPL-3.0): it has no Noisebud product or
+licence manifest, and must not be routed through the licensed app flow.
