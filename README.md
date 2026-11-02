@@ -120,6 +120,12 @@ anyone's hardware.
    `~/Resilio Sync/SYNK/SEM`) with `cmd copy`, size and SHA-256 checked. The shared signing and native
    runtime copies in `mac/` must match their upstream files in `C:\Projects` (`mac/SOURCE_HASHES.json`).
 
+**Mac DMG background:** releases use
+`/Users/macbook/Desktop/Certificat/Macinstaller.png` (case-sensitive), or
+`NOISEBUD_DMG_BACKGROUND` set by Builder. A missing/invalid PNG stops the build;
+there is no automatic fallback to the source archive's sample image. CI's
+unpublished unsigned development build selects its sample explicitly.
+
 **Mac**, in Noisebud Builder: register [builder-flows.json](builder-flows.json) once (merge its entry
 into Builder's `flows.json`; keep the other flows). The export then shows as "FM-1 Switch · free
 app" (flow `fm1-switch-source`, chosen by `FM1Switch/FM1SWITCH_BUILD_FLOW.txt`). Build it there, or

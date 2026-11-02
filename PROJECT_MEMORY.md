@@ -1,5 +1,17 @@
 # FM-1 Switch project memory
 
+## 2026-11-02 — 1.2.3, correct Mac-local DMG background
+
+Builder's synced 1.2.2 log showed create-dmg using the exported
+mac/assets/MacInstaller.png. The user requires
+/Users/macbook/Desktop/Certificat/Macinstaller.png. The release script now
+honors NOISEBUD_DMG_BACKGROUND, with that exact Mac-local default. Missing or
+non-PNG input stops before compilation/signing; no bundled fallback. CI's
+unpublished unsigned build explicitly selects its test fixture. Simulation
+tests cover selection, missing/invalid/default failures and the actual
+create-dmg argument. Shared pinned snapshots and all firmware code are unchanged.
+Actual signed Mac packaging/visual/native acceptance of 1.2.3 remains pending.
+
 ## 2026-11-02 — 1.2.1, actual Builder handoff
 
 The user's screenshot still selects the historical 1.1.0 ZIP with backslash
