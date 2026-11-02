@@ -2,6 +2,11 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.3.1
+
+- Startup confirmation also checks the normal FM-1 MIDI port after restoring
+  stock from firmware that used a manually selected, renamed port.
+
 ## 1.3.0
 
 - Recovery requires two identical full flash reads and a saved-file readback before writing. Backups have unique names and SHA-256 sidecars.

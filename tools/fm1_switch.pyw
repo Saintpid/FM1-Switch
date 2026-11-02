@@ -172,7 +172,7 @@ def confirm_rescue_boot(backend, product, port=None, secs=40, poll=0.5):
         return None
     end = time.monotonic() + secs
     while True:
-        dev = I.Updater(backend, port=port).find()
+        dev = I.Updater(backend, port=port).find(only_port=False)
         if dev:
             dev.link.close()
             if not dev.id.loader:

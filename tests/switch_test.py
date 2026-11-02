@@ -210,6 +210,9 @@ ok(S.confirm_rescue_boot(None, "FM-1_846", secs=0) is None,
 renamed.boot("ota-FM-1_900", "SLOOP")
 ok(S.confirm_rescue_boot(renamed, "FM-1_846", port="SLOOP", secs=0) is None,
    "recovery: update loader is not a running firmware")
+renamed.boot("FM-1_015", "FM-1")
+ok(S.confirm_rescue_boot(renamed, "FM-1_015", port="SLOOP", secs=0) == "FM-1_015",
+   "recovery: restored stock port is found after a renamed input")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)
