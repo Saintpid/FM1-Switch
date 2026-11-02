@@ -147,6 +147,28 @@ def package(product="FM-1_900", marker=True, size=0x2000):
     return bytes(raw)
 
 
+def ufw(product, blocks):
+    """a package as M-VAVE packs it: an ENC'd AC791N header and entry list, entries with their CRCs, the
+    identity in the markers of `blocks` blocks (36 in the SMK-37 Pro's V16)"""
+    body = bytearray((i * 13 + 5) & 0xFF for i in range(0x3000))
+    hdr = bytearray(0x40)
+    hdr[8:10] = (2).to_bytes(2, "little")
+    hdr[16:22] = b"AC791N"
+    logical = bytearray(I.unenc(bytes(hdr)))
+    for k, (off, size) in enumerate(((0x200, 0x1000), (0x1200, 0x300))):
+        e = bytearray(0x50)
+        e[0:2] = (k and 100).to_bytes(2, "little")
+        e[4:6] = I.crc16(bytes(body[off:off + size])).to_bytes(2, "little")
+        e[8:12], e[12:16] = off.to_bytes(4, "little"), size.to_bytes(4, "little")
+        logical += I.unenc(bytes(e))
+    logical += body[len(logical):]
+    raw = bytearray()
+    for i in range(blocks):
+        raw += logical[i * I.KEEP:(i + 1) * I.KEEP]
+        raw.append((ord(product[i]) + i + 1) & 0xFF if i < len(product) else 0x7D)
+    return bytes(raw + logical[blocks * I.KEEP:]), bytes(logical)
+
+
 TMP = Path(tempfile.mkdtemp(prefix="felucca-install-"))
 
 
@@ -179,6 +201,15 @@ def wire():
     ok(I.product_of(raw) == "FM-1_906" and len(I.logical_image(raw)) == len(raw) - 20, "product_of / logical_image (synthetic)")
     raw = package("FM-1_9001000")                  # X0X from 0.10: major, minor, patch, two digits each
     ok(I.product_of(raw) == "FM-1_9001000", "product_of: a 12-character identity")
+    raw, logical = ufw("SMK-37 Pro_016", 36)
+    ok(I.blocks_of(raw) == 36 and I.logical_image(raw) == logical and I.product_of(raw) == "SMK-37 Pro_016",
+       "36 marker blocks (SMK-37 Pro V16): read where its CRCs agree")
+    raw, logical = ufw("SMK-37 Elite_016", 20)
+    ok(I.blocks_of(raw) == 20 and I.logical_image(raw) == logical, "20 blocks with 0x7D markers up to 20: 20")
+    raw = bytearray(package("FM-1_906"))
+    raw[20 * I.BLK + I.KEEP] = 0x7D                # a payload byte that happens to look like a marker
+    ok(I.blocks_of(bytes(raw)) == 20, "a 0x7D byte after block 20 in a plain package: still 20")
+    ok(I.keyboard_stock(raw) is None and "SMK-37 Pro_016" in I.KEYBOARD_STOCK.values(), "M-VAVE's keyboard stock: by SHA-256")
 
 
 def installs():
@@ -261,6 +292,14 @@ def errors():
     dev = FakeFM1(I.logical_image(package(marker=False)))
     rc, out, err = cli([plain, "--yes", "--force"], dev)
     ok(rc == 0 and dev.bad == 0, "... installs with --force")
+    smk = package("SMK-37 Pro_016", marker=False)
+    I.KEYBOARD_STOCK[I.hashlib.sha256(smk).hexdigest()] = "SMK-37 Pro_016"
+    dev = FakeFM1(I.logical_image(smk), identity="SMK-37 Pro_015", name="SMK-37 Pro", after_write="SMK-37 Pro_016")
+    rc, out, err = cli([pkgfile("smk.fwsc", smk), "--yes"], dev)
+    ok(rc == 0 and dev.bad == 0 and "SMK-37 Pro_016" in out, "M-VAVE's SMK-37 stock: installs without the marker")
+    dev = FakeFM1(image, identity="SMK-37 Pro_016", name="SMK-37 Pro")
+    rc, out, err = cli([p, "--yes"], dev)
+    ok(rc == 6 and dev.upgrades == 0 and "SMK-37 Pro" in err, "an FM-1 package on an SMK-37 -> exit 6, nothing sent")
     rc, out, err = cli([pkgfile("short.fwsc", b"\0" * 100), "--yes"], FakeFM1(image))
     ok(rc == 2 and "too short" in err, "not a package -> exit 2")
     rc, out, err = cli([str(TMP / "missing.fwsc"), "--yes"], FakeFM1(image))

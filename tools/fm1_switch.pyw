@@ -11,7 +11,9 @@ first, reads what the FM-1 runs, and installs the one chosen with a progress bar
 V15 (no Felucca loader) is not listed, but Rescue… finds it there.
 
 Check FM-1 tells what state the FM-1 is in (running, an install cut off, the chip's own update mode,
-or nothing on USB) and what to do. Rescue… puts M-VAVE's stock firmware back on an FM-1 whose
+or nothing on USB) and what to do. M-VAVE's SMK-37 Pro / Elite, MKE-P37 and Starrykey 37 Play (the
+FM-1's chip and update; not yet tried on a real keyboard) take their own firmware, M-VAVE's stock
+packages included, over USB-MIDI; never an FM-1's, and Rescue refuses them. Rescue… puts M-VAVE's stock firmware back on an FM-1 whose
 firmware no longer starts, through the chip's own update mode (fm1_rescue.py, run as administrator
 or root: the program starts itself again with --rescue for that).
 
@@ -70,7 +72,8 @@ def default_folders(here=None):
 
 
 class Package:
-    """an FM-1 package; kind "felucca" installs over USB-MIDI, "v15" / "other" only by Rescue"""
+    """an FM-1 or SMK-37 package; kind "felucca" (and "stock", M-VAVE's own for a keyboard) installs over
+    USB-MIDI, "v15" / "other" only by Rescue"""
 
     def __init__(self, path, product, kind="felucca"):
         self.path, self.product, self.kind = Path(path), product, kind
@@ -78,20 +81,26 @@ class Package:
         self.number = int(m[1]) if m else 0
 
     @property
+    def model(self):
+        return "FM-1" if self.kind == "v15" else I.model_of(self.product)
+
+    @property
     def family(self):
-        if self.kind == "v15":
+        if self.kind in ("v15", "stock"):
             return "M-VAVE"
+        if self.model != "FM-1":
+            return self.model
         n = self.path.name.lower()
         return "NB303" if n.startswith("nb303") else "Wild" if n.startswith("wild") else \
             "n001se" if n.startswith("n001se") else "?"
 
     def label(self):
         return f"{self.path.stem}   ({'V15' if self.kind == 'v15' else self.product})" + \
-            ("   rescue only" if self.kind != "felucca" else "")
+            ("   rescue only" if self.kind in ("v15", "other") else "")
 
 
 def package_at(f):
-    """the Package for a file, or None if it is not an FM-1 package"""
+    """the Package for a file, or None if it is not an FM-1 (or SMK-37) package"""
     try:
         raw = Path(f).read_bytes()
         product = I.product_of(raw)
@@ -99,8 +108,12 @@ def package_at(f):
         return None
     if R.sha256(raw) == R.STOCK_SHA256:
         return Package(f, product, "v15")
+    if I.keyboard_stock(raw):
+        return Package(f, I.keyboard_stock(raw), "stock")
     if re.fullmatch(r"[^_]+_\d+", product) and I.model_of(product) == "FM-1":
         return Package(f, product, "felucca" if I.LOADER_MARK in raw else "other")
+    if re.fullmatch(r"[^_]+_\d+", product) and I.model_of(product) in I.KEYBOARDS and I.LOADER_MARK in raw:
+        return Package(f, product, "felucca")
     return None
 
 
@@ -119,15 +132,15 @@ def scan(folders, rescue_only=True):
                 continue
             seen.add(key)
             p = package_at(f)
-            if p and (rescue_only or p.kind == "felucca"):
+            if p and (rescue_only or p.kind in ("felucca", "stock")):
                 out.append(p)
-    out.sort(key=lambda p: (p.kind == "v15", -p.number, p.path.name))
+    out.sort(key=lambda p: (p.kind in ("v15", "stock"), p.model != "FM-1", -p.number, p.path.name))
     return out
 
 
 def rescue_choices(folders):
-    """what Rescue can put back: V15 first (None: download it from M-VAVE), then the rest"""
-    pk = scan(folders)
+    """what Rescue can put back: V15 first (None: download it from M-VAVE), then the rest (FM-1 only)"""
+    pk = [p for p in scan(folders) if p.model == "FM-1"]
     v15 = [p for p in pk if p.kind == "v15"][:1]
     return (v15 or [None]) + [p for p in pk if p.kind != "v15"]
 
@@ -144,7 +157,7 @@ def device_text(backend):
 
 def install(backend, pkg, step):
     """the whole update; step(kind, value) as fm1_install's Progress gets it. -> the identity after"""
-    if pkg.kind != "felucca":
+    if pkg.kind not in ("felucca", "stock"):
         raise I.InstallError("badpkg", f"{pkg.path.name} has no Felucca update loader, so it cannot be "
                                        "installed over USB-MIDI here: use M-UPGRADE, or Check / unbrick… "
                                        "and Rescue, which puts any FM-1 firmware back")
@@ -189,7 +202,17 @@ def open_midi(make=None):
 def row_values(p):
     """the firmware list's columns for a Package: family, file, identity, note"""
     return (p.family, p.path.stem, "V15" if p.kind == "v15" else p.product,
-            "" if p.kind == "felucca" else "rescue only")
+            {"felucca": "", "stock": "stock"}.get(p.kind, "rescue only"))
+
+
+def keyboard(ident):
+    """the M-VAVE keyboard model (SMK-37 Pro...) an identity is from, or None for an FM-1"""
+    m = I.model_of(ident or "")
+    return m if m in I.KEYBOARDS else None
+
+
+KEYBOARD_NOTE = ("Support for M-VAVE's keyboards is new and not yet tried on a real one. FM-1 firmware is "
+                 "refused on it, and Rescue is for the FM-1 only.")
 
 
 STATE_TONE = {"running": "ok", "loader": "warn", "uboot": "warn", "none": "off"}
@@ -217,6 +240,12 @@ def diagnose(backend, probe=R.uboot_present, secs=8.0, poll=0.5):
 
 def advice(state, ident=None, probe_ok=True):
     """(headline, what to do) for a diagnosis"""
+    kb = keyboard(ident)
+    if kb and state in ("running", "loader"):
+        return (f"{kb}: " + (f"runs {ident}" if state == "running" else f"in update mode ({ident})"),
+                f"Choose a firmware for the {kb} (M-VAVE's own stock file, or a port made for it) and "
+                "press Install" + (" to finish the install that was cut off. " if state == "loader" else ". ")
+                + KEYBOARD_NOTE)
     if state == "running":
         return (f"FM-1: runs {ident}",
                 "Choose a firmware file and press Install. If the screen is stuck, hold OCT- and OCT+ "
@@ -228,7 +257,8 @@ def advice(state, ident=None, probe_ok=True):
     if state == "uboot":
         return ("FM-1: in the chip's own update mode",
                 "Its firmware does not start. Press Rescue… to put M-VAVE's stock firmware back; "
-                "then install Wild or NB303 as usual.")
+                "then install Wild or NB303 as usual. (An SMK-37 keyboard in this mode: Rescue refuses "
+                "it, it is for the FM-1 only.)")
     return ("FM-1: not found",
             "1. A USB data cable straight into the computer (no hub), the FM-1 switched on, no other "
             "MIDI app open. 2. If it shows a picture but does not answer: hold OCT- and OCT+ for 5 "
@@ -286,6 +316,14 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
                      "With the adapter wired and on USB: Try with the adapter (experimental). It has not "
                      "been tried on an FM-1 from this app yet."],
                     "Open the FM-1-transporter guide")
+    kb = keyboard(ident)
+    if kb and state in ("running", "loader"):
+        return Plan("install" if state == "running" else "finish",
+                    f"The {kb} runs {ident}: it is not bricked" if state == "running"
+                    else f"An install was cut off: the {kb} waits for it",
+                    [f"Choose a firmware for the {kb} in the list (M-VAVE's own stock file, or a port made "
+                     f"for the {kb}) and press Install. Do not unplug it while it writes.", KEYBOARD_NOTE],
+                    "Install the chosen file" if state == "running" else "Finish the install")
     if state == "running":
         return Plan("install", f"The FM-1 runs {ident}: it is not bricked",
                     ["Choose a firmware file in the list and press Install.",
@@ -302,7 +340,9 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
     if state == "uboot":
         return _rescue("The firmware does not start: the FM-1 is in the chip's own update mode",
                        ["The chip waits for a computer to put a firmware back. Rescue puts M-VAVE's own "
-                        "(V15) back, and saves the whole flash first."])
+                        "(V15) back, and saves the whole flash first.",
+                        "An M-VAVE SMK-37 keyboard looks the same in this mode: Rescue refuses it (after the "
+                        "backup) and writes nothing, as it is for the FM-1 only."])
     if screen in ("normal", "safe", "update"):
         what = {"normal": "It runs", "safe": "It is in Wild's safe mode (USB on, no sound)",
                 "update": "It is in update mode"}[screen]
@@ -668,7 +708,7 @@ def main():
         state["pkgs"] = scan(folders)
         lst.delete(*lst.get_children())
         for p in state["pkgs"]:
-            lst.insert("", "end", values=row_values(p), tags=(() if p.kind == "felucca" else ("other",)))
+            lst.insert("", "end", values=row_values(p), tags=(() if p.kind in ("felucca", "stock") else ("other",)))
         if not state["pkgs"]:
             lst.insert("", "end", values=("", "No .fwsc files here yet: Add folder…", "", ""), tags=("other",))
         elif state["pkgs"][0].kind == "felucca":

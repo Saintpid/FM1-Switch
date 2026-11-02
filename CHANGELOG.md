@@ -2,6 +2,19 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.3.0
+
+- **M-VAVE's SMK-37 keyboards (experimental).** The SMK-37 Pro, SMK-37 Elite, MKE-P37 and Starrykey
+  37 Play have the FM-1's chip and the same update. FM-1 Switch now hears them, lists their firmware
+  files and installs a firmware made for that model, M-VAVE's own stock files included (the V16 of
+  the Pro and the MKE-P37 too, which are packed differently). Check / unbrick… tells which keyboard
+  it is. This is not yet tried on a real keyboard: tell us how it goes.
+- **No FM-1 firmware on a keyboard, and the other way round.** An FM-1 file is refused on an SMK-37
+  before anything is sent, and an SMK-37 file on an FM-1.
+- **Rescue stays FM-1 only.** An SMK-37 in the chip's own update mode looks just like an FM-1 there.
+  Rescue now recognises it (its flash, or its factory calibration) and stops before it writes
+  anything. The keyboard's calibration and pairing are never touched.
+
 ## 1.2.2
 
 - **Install works again.** Installing a firmware stopped right at the start with "got an unexpected

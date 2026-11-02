@@ -12,6 +12,10 @@ the FM-1 restarts and the installed identity is checked.
   fm1_install.py PACKAGE.fwsc [--port NAME] [--yes] [--force]
   fm1_install.py --info [--port NAME]
 
+M-VAVE's keyboards with the FM-1's chip and update (SMK-37 Pro, SMK-37 Elite, MKE-P37, Starrykey
+37 Play) take the same update: a package installs only on its own model, and their stock packages
+(no Felucca loader) are known by their SHA-256. Not yet tried on a real keyboard.
+
 If the FM-1 is still in update mode (an earlier install was cut off), the
 install finishes the write. Needs mido with python-rtmidi.
 
@@ -20,6 +24,7 @@ Exit codes: 0 done, 1 cancelled or other error, 2 bad arguments or package,
 loader / no restart), 6 wrong model, or another identity after the install.
 """
 import argparse
+import hashlib
 import queue
 import re
 import sys
@@ -31,7 +36,28 @@ FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
 MAXDATA = 512
 BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
 LOADER_MARK = b"FELUCCA-LOADER-1"
-PORT_RE = re.compile(r"fm-1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
+PORT_RE = re.compile(r"fm-1|felucca|ota|composite|sinco|usb-midi|smk|elite|mke-p37|starry",
+                     re.I)   # never probe other gear
+
+# M-VAVE's keyboards on the FM-1's chip (genkigenki/fm1-to-smk37, docs 02): their models, and
+# their stock packages by SHA-256 -> identity (jonathaslacerda/smk-37-pro-docs). Starrykey's V15
+# package carries only 20 of its 21 identity characters.
+KEYBOARDS = ("SMK-37 Pro", "SMK-37 Elite", "MKE-P37", "STARRYKEY-37 PLAY")
+KEYBOARD_STOCK = {
+    "9b55251b42f433f71fba7cd09c68dca2b28f773e40dc4c2d6d985c84ec4aaf2a": "SMK-37 Pro_011",
+    "c6a9187e706aeae921447ec88e29fecbc618e3f1fc3de54c743c78e41781580a": "SMK-37 Pro_012",
+    "4ebcb993fbaf834456c3f1391684aa29b26beb7f63d1960c283741be4cb16c40": "SMK-37 Pro_013",
+    "a8306f6a2bf88fdf3cfc1fad536c29d61f4599a8cff72a36d535e7d980d02f6b": "SMK-37 Pro_014",
+    "f7f1831cd7c9ad8b4831b6e71ea0bdbcdff9ae4c4077276b3c965511bf4d4fff": "SMK-37 Pro_015",
+    "2d98ce72530e71d617384963423820536f094501299e2cfec0a8d3c3fb6bcfb0": "SMK-37 Pro_016",
+    "6cb061bda6fc4a285a1a1014e4fc30782278fa62bdc3add75d14b29d4d76253e": "SMK-37 Elite_015",
+    "b2ee38abfef3ae922e4eecdb8a551e14345300ae6f270265feacd33b6ef99cb6": "SMK-37 Elite_016",
+    "8af884a8989bfbf33d46adc2ac5f913e1b672be1d253a6b64b25fc60be69bf73": "MKE-P37_013",
+    "280ee7aae59a17c38bc2e854802c7d08f076e51afff13eb5315ad3748476491f": "MKE-P37_015",
+    "4306ae5b765ab9afb790edf6d02fa75e872897dbd319049e3956ddd283a51429": "MKE-P37_016",
+    "3ef5d835e88324a925593e1e6959106e16abeabbabf824263803bb236b09224b": "STARRYKEY-37 PLAY_015",
+    "3cd57cdd90ee60501c549b9dde53503ef468122e2f34dc110876eefdaf9be3b3": "STARRYKEY-37 PLAY_016",
+}
 
 # seconds; the tests shorten them
 DELAY = {"open": 0.3, "start": 2.0, "reply": 0.01, "loader": 3.0, "reboot": 3.0, "retry": 1.0,
@@ -116,19 +142,72 @@ def parse_identity(pkt):
 
 # --------------------------------------------------------------- package ---
 
+def crc16(data, crc=0):
+    """CRC-16/XMODEM, as the package's entries carry it"""
+    for b in data:
+        crc ^= b << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return crc
+
+
+def unenc(buf, key=0xFFFF):
+    """JieLi's ENC stream cipher, which hides the package's header and entry list"""
+    out = bytearray(buf)
+    for i in range(len(out)):
+        out[i] ^= key & 0xFF
+        key = ((key << 1) ^ (0x1021 if key & 0x8000 else 0)) & 0xFFFF
+    return bytes(out)
+
+
+def _unmarked(raw, blocks):
+    out = bytearray()
+    for i in range(blocks):
+        out += raw[i * BLK:i * BLK + KEEP]
+    return bytes(out + raw[blocks * BLK:])
+
+
+def _crcs_ok(image):
+    """how many of the package's small entries match their CRC in this reading (-1: no AC791N header)"""
+    hdr = unenc(image[:0x40])
+    if hdr[16:22] != b"AC791N":
+        return -1
+    good = 0
+    for i in range(min(int.from_bytes(hdr[8:10], "little"), 16)):
+        e = unenc(image[0x40 + i * 0x50:0x90 + i * 0x50])
+        dcrc, off, size = int.from_bytes(e[4:6], "little"), int.from_bytes(e[8:12], "little"), \
+            int.from_bytes(e[12:16], "little")
+        if 0 < size <= 0x10000 and off + size <= len(image) and crc16(image[off:off + size]) == dcrc:
+            good += 1
+    return good
+
+
+def blocks_of(raw):
+    """marker blocks: 20, or more when the 0x7D markers run on past block 20 (M-VAVE's SMK-37 Pro and
+    MKE-P37 V16 packages have 36) and the package's own CRCs agree with the longer reading"""
+    n = BLOCKS
+    while (n + 1) * BLK <= len(raw) and raw[n * BLK + KEEP] == 0x7D:
+        n += 1
+    if n > BLOCKS and _crcs_ok(_unmarked(raw, n)) > _crcs_ok(_unmarked(raw, BLOCKS)):
+        return n
+    return BLOCKS
+
+
 def product_of(raw):
-    """the package identity ("FM-1_906"): one marker byte after each of the first 20 blocks"""
+    """the package identity ("FM-1_906"): one marker byte after each of the first blocks"""
     if len(raw) < BLOCKS * BLK:
         raise InstallError("badpkg", "not an FM-1 package (too short)")
     return "".join(chr((m - i - 1) & 0xFF) for i in range(BLOCKS) if (m := raw[i * BLK + KEEP]) != 0x7D)
 
 
 def logical_image(raw):
-    """the image the device reads during an update: the package without the 20 marker bytes"""
-    out = bytearray()
-    for i in range(BLOCKS):
-        out += raw[i * BLK:i * BLK + KEEP]
-    return bytes(out + raw[BLOCKS * BLK:])
+    """the image the device reads during an update: the package without its marker bytes"""
+    return _unmarked(raw, blocks_of(raw))
+
+
+def keyboard_stock(raw):
+    """the identity of an M-VAVE stock package for an SMK-37 / MKE-P37 / Starrykey, or None"""
+    return KEYBOARD_STOCK.get(hashlib.sha256(raw).hexdigest())
 
 
 def model_of(text):
@@ -366,10 +445,10 @@ def load_package(path, force):
         raw = open(path, "rb").read()
     except OSError as e:
         raise InstallError("badpkg", f"cannot read {path}: {e.strerror}")
-    product = product_of(raw)
+    product = keyboard_stock(raw) or product_of(raw)
     if not re.fullmatch(r"[^_]+_\d+", product):
         raise InstallError("badpkg", f"{path}: not an FM-1 package (identity {product!r})")
-    if LOADER_MARK not in raw and not force:
+    if LOADER_MARK not in raw and not force and not keyboard_stock(raw):
         raise InstallError("badpkg", f"{path}: no Felucca update loader in this package; "
                                      "only Felucca's own packages are installed (--force overrides)")
     return product, logical_image(raw)

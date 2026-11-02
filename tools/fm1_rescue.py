@@ -49,6 +49,12 @@ LOADER_SHA256 = "d41da6126760c9d66660bcc0cac8d27d221806c5e369a8036921efe68dca537
 LOADER_ADDR, LOADER_ARG = 0x1C02000, 0x0001
 
 FLASH_SIZE = 0x100000
+# M-VAVE's SMK-37 (Pro, Elite, MKE-P37) has the FM-1's chip, key and UBOOT, but another flash map, its
+# factory calibration at 0xC1000 (marker "trimdat" at 0xC1224) and, on the unit tried, flash EB6014
+KEYBOARD_FLASH = 0xEB6014
+TRIM_MARK, TRIM_AT = b"trimdat\0", 0xC1224
+KEYBOARD = ("this is an M-VAVE SMK-37 keyboard (or an MKE-P37), not an FM-1: Rescue is for the FM-1 "
+            "only, and an FM-1 firmware must never go on the keyboard; nothing written")
 APP_END = 0x93000          # the .fwsc flash entry is raw flash [0, APP_END)
 WRITE_MIN = 0x4000         # flash header, SPL, isd_config: never written
 SECTOR = 0x1000
@@ -570,6 +576,8 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
     dev.start_loader(loader)
     key, typ, fid = dev.chip()
     say(f"  chip key {key:04X}, flash type {typ}, id {fid:06X}")
+    if fid == KEYBOARD_FLASH:
+        raise Fail(KEYBOARD)
     if (key, typ, fid) != (0x980F, 3, 0x856014):
         raise Fail("this is not the FM-1's chip and flash (expected key 980F, type 3, id 856014); nothing written")
     if not app_key_ok(image, key):
@@ -588,6 +596,8 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
             pass
     say(f"  backup saved: {path} ({time.time() - t0:.1f} s)")
     step("backup", path)
+    if now[TRIM_AT:TRIM_AT + len(TRIM_MARK)] == TRIM_MARK:  # its calibration: the same flash part as an FM-1's
+        raise Fail(f"{KEYBOARD} (the backup is kept)")
     diff = [a for a in range(0, APP_END, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
     low = [a for a in diff if a < WRITE_MIN]
     if low and strict_head:
