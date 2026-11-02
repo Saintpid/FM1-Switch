@@ -2,6 +2,15 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.2.3
+
+- Mac DMGs use `/Users/macbook/Desktop/Certificat/Macinstaller.png`, or the
+  image explicitly selected by Noisebud Builder through `NOISEBUD_DMG_BACKGROUND`.
+  A missing or invalid image stops before compilation/signing; the exported
+  sample image is no longer silently used for releases.
+- The CI-only unsigned development build selects its bundled test fixture
+  explicitly. Firmware, USB, rescue and installer identity behavior is unchanged.
+
 ## 1.2.2
 
 - **Install works again.** Installing a firmware stopped right at the start with "got an unexpected
