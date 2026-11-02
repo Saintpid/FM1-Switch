@@ -190,6 +190,11 @@ ok(order[-1] == app and order[-2] == app / "Contents/Frameworks/Tcl.framework" a
 ok(B.dmg_name("1.2.0") == "FM1Switch_macOS_v1.2.0.dmg" and "DEV" in B.dmg_name("1.2.0", True),
    "the DMG's name matches the flow's output; a dev build's does not")
 
+hook = (ROOT / "mac/pyinstaller-hooks/hook-usb.py").read_text()
+ok("binaries = []" in hook and any(x.startswith("importlib_resources==") for x in B.PURE)
+   and "FM1Switch/mac/pyinstaller-hooks/hook-usb.py" in names,
+   "app: no build Mac's libusb bundled (own pyusb hook, exported), libusb-package's dependency pinned")
+
 # ---- Noisebud Builder's own gate, when it is on this computer
 gate = Path(os.environ.get("NOISEBUD_BUILDER_DIR", "C:/Projects/Noisebud Builder")) / "tools/check_export.py"
 if gate.is_file():

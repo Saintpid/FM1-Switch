@@ -43,7 +43,8 @@ try {
     Invoke-Checked 'PyInstaller' {
         & $py -m PyInstaller --noconfirm --windowed --name FM1-Switch --icon $icon --paths . `
             --hidden-import mido.backends.rtmidi --hidden-import serial.tools.list_ports --collect-data sv_ttk `
-            --add-data "..\VERSION;." --add-data "..\LICENSE;." --add-data "..\DISCLAIMER.md;." `
+            --add-data "$(Join-Path $root 'VERSION');." --add-data "$(Join-Path $root 'LICENSE');." `
+            --add-data "$(Join-Path $root 'DISCLAIMER.md');." `
             --distpath (Join-Path $work 'dist') --workpath (Join-Path $work 'pyi') --specpath $work fm1_switch.pyw
     }
 } finally { Pop-Location }
