@@ -16,6 +16,7 @@ import struct
 import sys
 import tempfile
 import zlib
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,6 +274,9 @@ for name, make in (("USB", lambda d: d), ("Windows", lambda d: R.WinScsi(r"\\.\P
                     step=lambda k, v=None: steps.append((k, v)))
     backup = [s[1] for s in steps if s[0] == "backup"]
     ok(done and backup and open(backup[0], "rb").read() == now, f"{name}: the whole flash backed up first")
+    ok(open(backup[0] + ".sha256").read().split()[0] == R.sha256(now)
+       and steps[:2] == [("backup_read", 1), ("backup_read", 2)],
+       f"{name}: two backup passes and saved checksum")
     ok(bytes(dev.flash) == image + now[R.APP_END:], f"{name}: the flash is V15, the device data kept")
     ok(dev.erased == [0x92000, 0x40000, 0x6000, 0x5000], f"{name}: only the 4 differing sectors, high to low")
     ok(all(R.WRITE_MIN <= a < R.APP_END for a in dev.writes), f"{name}: nothing below 0x4000 or from 0x93000")
@@ -283,6 +287,23 @@ image, now = flashes()
 dev = FakeUboot(now)
 ok(R.rescue(R.Uboot(dev), image, LOADER, False, tmp, say=lambda *a, **k: None) is False and not dev.erased,
    "without --write: checked and backed up, nothing written")
+
+# A corrupted second read must fail before a single erase/write.
+dev = FakeUboot(now)
+wrapped = R.Uboot(dev)
+read = wrapped.read
+reads = [0]
+def unstable_read(addr, size):
+    data = read(addr, size)
+    reads[0] += 1
+    return bytes([data[0] ^ 1]) + data[1:] if reads[0] == 2 else data
+wrapped.read = unstable_read
+try:
+    R.rescue(wrapped, image, LOADER, True, tmp, say=lambda *a, **k: None)
+    ok(False, "different backup reads: refused")
+except R.Fail as e:
+    ok("backup reads differ" in str(e) and not dev.erased and not dev.writes,
+       "different backup reads: refused before erase/write")
 
 bad = bytearray(now)
 bad[0x1234] ^= 1
@@ -316,9 +337,12 @@ try:
              step=lambda k, v=None: steps.append((k, v)))
     ok(False, "an SMK-37 with the FM-1's flash part (its calibration): refused, backed up")
 except R.Fail as e:
-    ok("SMK-37" in str(e) and not dev.erased and not dev.writes and steps and steps[0][0] == "backup",
+    backups = [v for k, v in steps if k == "backup"]
+    ok("SMK-37" in str(e) and not dev.erased and not dev.writes and len(backups) == 1,
        "an SMK-37 with the FM-1's flash part (its calibration): refused, backed up")
-    os.remove(steps[0][1])
+    for b in backups:
+        os.remove(b)
+        os.remove(b + ".sha256")
 
 # ---- any FM-1 firmware: its app area, the FM-1's own head kept; refused for another chip key
 image, now = flashes()
@@ -435,6 +459,17 @@ except R.Fail:
 if sys.platform == "win32":
     ok(R.windows_uboot_disks() == [] and R.uboot_present() is False and R.is_admin() in (True, False),
        "Windows: the disks looked at, no FM-1 among them")
+
+# Approval denial must not signal readiness or start a device wait.
+progress = str(Path(tmp) / "denied.jsonl")
+with patch.object(R, "load_package", return_value=(image, "v15", "FM-1_015")), \
+     patch.object(R, "get_loader", return_value=LOADER), \
+     patch.object(R, "is_admin", return_value=False), \
+     patch.object(R, "open_device") as opened:
+    code = R.main(["fixture.fwsc", "--write", "--progress", progress])
+events, _ = R.read_progress(progress)
+ok(code == 1 and not opened.called and not any(e.get("step") == "ready" for e in events),
+   "permission denied: no readiness, device timer or writes")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

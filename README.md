@@ -22,6 +22,30 @@ It follows the system's dark or light mode (Windows 11's own look, through
 
 ## Use
 
+Ready-made installers are distributed through [Noisebud on Patreon](https://www.patreon.com/Noisebud).
+GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
+uploading installers or application binaries.
+
+### Recovery and access in 1.3.0
+
+On macOS, access preparation explains the MIDI and folder requests before they
+appear. Read each system request at your own pace. Recovery prepares its files,
+requests administrator access, then starts waiting for the device only after
+the helper has access. No firmware is written during the permission request.
+
+Recovery reads the complete flash twice, requires identical results, saves a
+uniquely named backup, reads the saved file back and records its SHA-256 beside
+it before writing. After flash verification, the app checks the running MIDI
+identity. If it cannot confirm startup (including an adapter still connected),
+it reports that separately and offers a direct USB check; it does not claim a
+confirmed recovery. Keep the window open until the operation finishes.
+
+Use **MIDI input** to select a renamed port explicitly when Automatic cannot
+find your firmware. Selection sends the identity query first; installation
+still checks the model. The updater must also be able to find the update loader
+and the firmware's MIDI port after reboot; keep the selected firmware's expected
+port names in mind when diagnosing a missing restart.
+
 1. Install it: **FM-1 Switch Setup X.Y.Z.exe** on Windows (it installs in Program Files\Noisebud),
    or open **FM1Switch_macOS_vX.Y.Z.dmg** on the Mac and run the installer in it (it installs in
    Applications). Both show the licence first: free software, at your own risk. It lists the `.fwsc`
@@ -136,6 +160,12 @@ anyone's hardware.
    copied to `C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM` (synced to the Mac's
    `~/Resilio Sync/SYNK/SEM`) with `cmd copy`, size and SHA-256 checked. The shared signing and native
    runtime copies in `mac/` must match their upstream files in `C:\Projects` (`mac/SOURCE_HASHES.json`).
+
+**Mac DMG background:** releases use
+`/Users/macbook/Desktop/Certificat/Macinstaller.png` (case-sensitive), or
+`NOISEBUD_DMG_BACKGROUND` set by Builder. A missing/invalid PNG stops the build;
+there is no automatic fallback to the source archive's sample image. CI's
+unpublished unsigned development build selects its sample explicitly.
 
 **Mac**, in Noisebud Builder: register [builder-flows.json](builder-flows.json) once (merge its entry
 into Builder's `flows.json`; keep the other flows). The export then shows as "FM-1 Switch · free

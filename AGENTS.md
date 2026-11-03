@@ -1,5 +1,10 @@
 # FM-1 Switch project instructions
 
+Distribution: GitHub hosts source code only. Do not commit built applications,
+installers, DMGs, PKGs or binary release archives, and do not publish them as
+GitHub Release assets or Actions artifacts. Distribute ready-made installers
+through Patreon. CI may build and verify packages without uploading them.
+
 Read `PROJECT_MEMORY.md`, `CLAUDE.md` and `docs/MAC_RELEASE.md` before changing
 the project. Shared instructions in `C:/Projects/AGENTS.md` also apply.
 

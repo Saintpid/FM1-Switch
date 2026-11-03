@@ -195,6 +195,38 @@ ok("binaries = []" in hook and any(x.startswith("importlib_resources==") for x i
    and "FM1Switch/mac/pyinstaller-hooks/hook-usb.py" in names,
    "app: no build Mac's libusb bundled (own pyusb hook, exported), libusb-package's dependency pinned")
 
+# ---- the selected DMG background, without any silent bundled fallback
+from unittest.mock import patch
+ok(B.DEFAULT_DMG_BACKGROUND == "/Users/macbook/Desktop/Certificat/Macinstaller.png",
+   "DMG: default is the real Mac-local Certificat image (exact case)")
+image = tmp / "Macinstaller.png"
+image.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+ok(B.dmg_background(env={"NOISEBUD_DMG_BACKGROUND": str(image)}) == image,
+   "DMG: explicit Builder background wins over the bundled image")
+for selected in (tmp / "missing.png", tmp / "invalid.png"):
+    if selected.name == "invalid.png":
+        selected.write_bytes(b"not PNG")
+    try:
+        B.dmg_background(env={"NOISEBUD_DMG_BACKGROUND": str(selected)})
+        ok(False, "DMG: missing/invalid image stops the build")
+    except B.Fail:
+        ok(True, "DMG: missing/invalid image stops the build")
+with patch.object(B, "DEFAULT_DMG_BACKGROUND", str(tmp / "absent-default.png")):
+    try:
+        B.dmg_background(env={})
+        ok(False, "DMG: missing default never falls back to bundled branding")
+    except B.Fail:
+        ok(True, "DMG: missing default never falls back to bundled branding")
+stage = tmp / "branding-stage"
+stage.mkdir()
+(stage / "Install.pkg").write_bytes(b"package fixture")
+with patch.dict(os.environ, {"NOISEBUD_DMG_BACKGROUND": str(image)}), \
+        patch.object(B.shutil, "which", return_value="create-dmg"), patch.object(B, "run") as execute:
+    B.make_dmg(stage, tmp / "test.dmg", "1.2.3")
+    args = execute.call_args.args
+    ok(args[args.index("--background") + 1] == image,
+       "DMG: create-dmg receives the selected local image")
+
 # ---- Noisebud Builder's own gate, when it is on this computer
 gate = Path(os.environ.get("NOISEBUD_BUILDER_DIR", "C:/Projects/Noisebud Builder")) / "tools/check_export.py"
 if gate.is_file():
