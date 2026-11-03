@@ -359,8 +359,26 @@ def notarize(path, profile, log):
     run("xcrun", "stapler", "validate", path)
 
 
+DEFAULT_DMG_BACKGROUND = "/Users/macbook/Desktop/Certificat/Macinstaller.png"
+
+
+def dmg_background(env=None):
+    """The selected local branding image, never a silent bundled fallback."""
+    env = os.environ if env is None else env
+    path = Path(env.get("NOISEBUD_DMG_BACKGROUND") or DEFAULT_DMG_BACKGROUND).expanduser()
+    if not path.is_absolute() or not path.is_file():
+        raise Fail("DMG background is missing: " + str(path) +
+                   ". Set NOISEBUD_DMG_BACKGROUND to the correct local PNG; no fallback is used.")
+    with path.open("rb") as stream:
+        if stream.read(8) != b"\x89PNG\r\n\x1a\n":
+            raise Fail("DMG background is not a PNG: " + str(path))
+    return path
+
+
 def make_dmg(stage, dmg, version):
     """the Noisebud installer look (as Follower's packager): background, volume icon, the PKG in place"""
+    background = dmg_background()
+    print("DMG background: " + str(background), flush=True)
     if not shutil.which("create-dmg"):
         if not shutil.which("brew"):
             raise Fail("create-dmg is missing and there is no Homebrew to install it")
@@ -368,7 +386,7 @@ def make_dmg(stage, dmg, version):
     pkg = next(stage.glob("*.pkg")).name
     run("create-dmg", "--volname", f"FM-1 Switch {version}", "--window-pos", "200", "120",
         "--window-size", "500", "500", "--icon-size", "100", "--icon", pkg, "250", "340",
-        "--background", HERE / "assets/MacInstaller.png", "--volicon", HERE / "assets/Noisebud.icns", dmg, stage)
+        "--background", background, "--volicon", HERE / "assets/Noisebud.icns", dmg, stage)
 
 
 def publish(src, dest):
@@ -397,6 +415,7 @@ def build(root, dev=False, check_only=False):
     if sys.platform != "darwin":
         raise Fail("The Mac build runs on a Mac")
     hw = check_native_host()
+    dmg_background()  # Fail before compilation/signing if branding is missing.
     check_python()
     check_tools()
     lines = packager_lines()

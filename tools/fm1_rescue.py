@@ -35,6 +35,7 @@ import os
 import struct
 import sys
 import time
+import tempfile
 import urllib.request
 import zlib
 
@@ -585,10 +586,23 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
                    f"{key:04X}); nothing written")
     say("  reading the whole flash ...")
     t0 = time.time()
+    step("backup_read", 1)
     now = dev.read(0, FLASH_SIZE)
-    path = os.path.join(backup_dir, time.strftime("fm1-backup-%Y%m%d-%H%M%S.bin"))
-    with open(path, "wb") as f:
+    step("backup_read", 2)
+    again = dev.read(0, FLASH_SIZE)
+    if len(now) != FLASH_SIZE or now != again:
+        raise Fail("backup reads differ or are incomplete; nothing written")
+    fd, path = tempfile.mkstemp(prefix=time.strftime("fm1-backup-%Y%m%d-%H%M%S-"),
+                                suffix=".bin", dir=backup_dir)
+    with os.fdopen(fd, "wb") as f:
         f.write(now)
+        f.flush()
+        os.fsync(f.fileno())
+    with open(path, "rb") as f:
+        if f.read() != now:
+            raise Fail("saved backup did not verify; nothing written")
+    with open(path + ".sha256", "x", encoding="ascii") as f:
+        f.write(sha256(now) + "  " + os.path.basename(path) + "\n")
     if owner:                                                # written as root: give it to the user
         try:
             os.chown(path, *owner)
@@ -981,6 +995,8 @@ def main(argv=None):
                 except ImportError:
                     raise Fail("pyusb is missing: ~/fm1-rescue/bin/pip install pyusb libusb-package")
         owner = tuple(int(x) for x in args.owner.split(":")) if args.owner else None
+        if pf:
+            pf.step("ready", None)
         stop = pf.stopped if pf else None
         for attempt in range(1, args.tries + 1):
             if via == "transporter":

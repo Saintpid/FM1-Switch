@@ -232,5 +232,25 @@ for ms, f, a in queued:
     f(*a)
 ok(len(queued) == 1 and got == {"a": ("x",), "kw": {"value": 42}}, "window: a call with keywords reaches Tk's thread")
 
+renamed = T.FakeFM1(b"", identity="FM-1_846", name="SLOOP")
+ok(S.confirm_rescue_boot(renamed, "FM-1_846", secs=0) is None,
+   "renamed MIDI: automatic search does not probe unrelated names")
+ok(S.confirm_rescue_boot(renamed, "FM-1_846", port="SLOOP", secs=0) == "FM-1_846",
+   "renamed MIDI: explicit selection reads identity")
+ok(S.diagnose(renamed, probe=lambda: False, secs=0, port="SLOOP") == ("running", "FM-1_846"),
+   "diagnosis uses selected MIDI port")
+ok(S.rescue_result("FM-1_846", "FM-1_846")[0]
+   and not S.rescue_result("FM-1_846", "FM-1_900")[0]
+   and not S.rescue_result("FM-1_846", None)[0],
+   "recovery confirmed only for the expected running identity")
+ok(S.confirm_rescue_boot(None, "FM-1_846", secs=0) is None,
+   "recovery: missing MIDI never implies successful startup")
+renamed.boot("ota-FM-1_900", "SLOOP")
+ok(S.confirm_rescue_boot(renamed, "FM-1_846", port="SLOOP", secs=0) is None,
+   "recovery: update loader is not a running firmware")
+renamed.boot("FM-1_015", "FM-1")
+ok(S.confirm_rescue_boot(renamed, "FM-1_015", port="SLOOP", secs=0) == "FM-1_015",
+   "recovery: restored stock port is found after a renamed input")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

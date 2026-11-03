@@ -155,14 +155,14 @@ def device_text(backend):
     return dev.id.text + ("  (in update mode: install again to finish)" if dev.id.loader else "")
 
 
-def install(backend, pkg, step):
+def install(backend, pkg, step, port=None):
     """the whole update; step(kind, value) as fm1_install's Progress gets it. -> the identity after"""
     if pkg.kind not in ("felucca", "stock"):
         raise I.InstallError("badpkg", f"{pkg.path.name} has no Felucca update loader, so it cannot be "
                                        "installed over USB-MIDI here: use M-UPGRADE, or Check / unbrick… "
                                        "and Rescue, which puts any FM-1 firmware back")
     product, image = I.load_package(str(pkg.path), False)
-    up = I.Updater(backend)
+    up = I.Updater(backend, port=port)
     dev = up.find()
     if not dev:
         raise I.not_found(up)
@@ -177,6 +177,32 @@ STEP_TEXT = {"start": "Starting the update on {}", "check": "Checking the packag
 def later(after, f, *a, **kw):
     """f(*a, **kw) on Tk's thread (after() itself passes no keywords: bar.configure(value=...))"""
     after(0, lambda: f(*a, **kw))
+
+
+def confirm_rescue_boot(backend, product, port=None, secs=40, poll=0.5):
+    """Read identity only: a verified flash is not proof that its firmware started."""
+    if backend is None:
+        return None
+    end = time.monotonic() + secs
+    while True:
+        dev = I.Updater(backend, port=port).find(only_port=False)
+        if dev:
+            dev.link.close()
+            if not dev.id.loader:
+                return dev.id.text
+        if time.monotonic() >= end:
+            return None
+        time.sleep(poll)
+
+
+def rescue_result(product, identity):
+    if identity == product:
+        return True, f"Recovery confirmed: the FM-1 runs {identity}."
+    if identity:
+        return False, f"Flash verified, but the FM-1 reports {identity}; expected {product}."
+    return False, ("Flash verified. Startup has not been confirmed over MIDI. "
+                   "If using an adapter, disconnect it after writing has finished, then reconnect "
+                   "the FM-1 directly by USB. Check the screen and press Check / unbrick….")
 
 
 def step_text(kind, value=None):
@@ -220,14 +246,14 @@ STATE_TONE = {"running": "ok", "loader": "warn", "uboot": "warn", "none": "off"}
 
 # ------------------------------------------------------------- diagnosis ---
 
-def diagnose(backend, probe=R.uboot_present, secs=8.0, poll=0.5):
+def diagnose(backend, probe=R.uboot_present, secs=8.0, poll=0.5, port=None):
     """-> (state, identity): "running" / "loader" (an install cut off) with the identity, "uboot"
     (the chip's own update mode), or "none". Watches for a few seconds: a crash-looping FM-1 is in
     UBOOT only now and then."""
     end = time.monotonic() + secs
     while True:
         if backend is not None:
-            dev = I.Updater(backend).find()
+            dev = I.Updater(backend, port=port).find()
             if dev:
                 dev.link.close()
                 return ("loader" if dev.id.loader else "running"), dev.id.text
@@ -534,8 +560,10 @@ def _shell_runas(cmd):
     return wait
 
 
-RESCUE_STEP = {"backup": "Backup saved: {}", "write": "Writing {}%",
-               "done": "Done: the firmware is back on the FM-1, and it restarts."}
+RESCUE_STEP = {"ready": "Access ready. Connecting to the FM-1; follow the next instruction.",
+               "backup_read": "Reading backup {}/2. Firmware has not been changed.",
+               "backup": "Two matching reads and saved backup verified: {}", "write": "Writing {}% — keep connected.",
+               "done": "Flash verified. Checking startup…"}
 
 
 # ------------------------------------------------------------------- window ---
@@ -589,7 +617,7 @@ def main():
     import tkinter as tk
     from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-    backend, midi_err = open_midi()
+    backend, midi_err = None, None
 
     if sys.platform == "win32":                 # sharp text on a scaled screen, not a blurry bitmap
         try:
@@ -704,7 +732,34 @@ def main():
     def ui(f, *a, **kw):
         later(root.after, f, *a, **kw)
 
+    def ui_wait(f, *a):
+        """Show a phase before launching a system permission prompt."""
+        shown = threading.Event()
+        def show():
+            try:
+                f(*a)
+                root.update_idletasks()
+            finally:
+                shown.set()
+        ui(show)
+        shown.wait()
+
+    port_var = tk.StringVar(value="Automatic")
+    port_row = ttk.Frame(top)
+    port_row.pack(side="bottom", fill="x", pady=(px(6), 0))
+    ttk.Label(port_row, text="MIDI input:", style="Muted.TLabel").pack(side="left")
+    port_box = ttk.Combobox(port_row, textvariable=port_var, state="readonly", width=42)
+    port_box.pack(side="left", padx=px(8))
+
+    def selected_port():
+        return None if port_var.get() == "Automatic" else port_var.get()
+
     def refresh():
+        try:
+            ports = backend.input_names() if backend else []
+        except Exception:
+            ports = []
+        port_box["values"] = ["Automatic"] + ports
         state["pkgs"] = scan(folders)
         lst.delete(*lst.get_children())
         for p in state["pkgs"]:
@@ -716,6 +771,7 @@ def main():
 
     def busy(on):
         state["busy"] = on
+        port_box.configure(state="disabled" if on else "readonly")
         for b in buttons:
             b.state(["disabled"] if on else ["!disabled"])
 
@@ -734,7 +790,7 @@ def main():
         def work():
             probe_ok = R.uboot_present() is not None
             try:
-                state, ident = diagnose(backend, R.uboot_present if probe_ok else None, secs)
+                state, ident = diagnose(backend, R.uboot_present if probe_ok else None, secs, port=port)
             except Exception as e:      # (a port that will not open: another app has it)
                 ui(dev_var.set, "FM-1: could not be read")
                 ui(status.set, f"Error: {e} (another app using the FM-1's MIDI port?)")
@@ -745,6 +801,7 @@ def main():
                 ui(status.set, todo)
                 ui(set_tone, STATE_TONE.get(state, "off"))
             ui(busy, False)
+        port = selected_port()
         threading.Thread(target=work, daemon=True).start()
 
     def do_rescue(via="usb"):
@@ -828,17 +885,22 @@ def main():
             w.grab_release()
             w.destroy()
             run_rescue(c, d, via)
-        go = ttk.Button(row2, text="Start the rescue", style="Accent.TButton", command=start)
+        ttk.Label(f, text="Next: prepare files, request system access, verify two backups, then write. "
+                  "You can read the system permission request at your own pace.",
+                  style="Muted.TLabel", wraplength=wrap).pack(anchor="w", pady=(px(8), 0))
+        go = ttk.Button(row2, text="Prepare recovery", style="Accent.TButton", command=start)
         go.state(["disabled"])
         go.pack(side="right")
         ttk.Button(row2, text="Cancel", command=w.destroy).pack(side="right", padx=(0, px(8)))
 
     def run_rescue(target, d, via):
         busy(True)
-        rb.state(["!disabled"])
+        port = selected_port()
+        status.set("Preparing recovery files. Firmware has not been changed.")
         bar["value"] = 0
         fd, prog = tempfile.mkstemp(prefix="fm1-rescue-", suffix=".jsonl")
         os.close(fd)
+        state["rescue"] = prog
         name = "M-VAVE's V15" if target is None or target.kind == "v15" else target.path.name
 
         def work():
@@ -847,15 +909,15 @@ def main():
                 ui(status.set, "Getting JieLi's flash loader…")
                 R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
                 cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via))
+                ui_wait(status.set, "Waiting for system approval. Take your time with the permission dialog. "
+                        "The device timer starts after access is granted; firmware has not been changed."
+                        if via == "usb" else "Connecting to the adapter. Firmware has not been changed.")
                 wait = subprocess.Popen(cmd).wait if via != "usb" else run_elevated(cmd)
             except Exception as e:
                 ui(status.set, f"Rescue not started: {e}")
                 ui(end_rescue)
                 return
             state["rescue"] = prog
-            ui(rb.configure, text="Stop")
-            ui(status.set, f"Putting back {name}. Waiting for the FM-1 in the chip's update mode: "
-                           + ("follow the adapter's steps." if via != "usb" else "switch it off and on now."))
             done, pos, end = {"code": None}, 0, None
             t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
             t.start()
@@ -866,7 +928,11 @@ def main():
                         ui(status.set, e["say"])
                     elif e.get("step") in RESCUE_STEP:
                         ui(status.set, RESCUE_STEP[e["step"]].format(e.get("value") or ""))
+                        if e["step"] == "ready":
+                            ui(rb.configure, text="Stop")
+                            ui(rb.state, ["!disabled"])
                         if e["step"] == "write":
+                            ui(rb.state, ["disabled"])
                             ui(bar.configure, value=e["value"])
                         elif e["step"] == "done":
                             ui(bar.configure, value=100)
@@ -878,8 +944,14 @@ def main():
                     break
                 time.sleep(0.2)
             if end and end["end"] == "ok":
-                msg = f"Done: {name} is back on the FM-1, and it restarts."
-                ui(dev_var.set, f"FM-1: {name}")
+                ui(status.set, "Flash verified. Waiting up to 40 seconds for the firmware to answer over MIDI…")
+                try:
+                    identity = confirm_rescue_boot(backend, end.get("product"), port=port)
+                except Exception:
+                    identity = None
+                confirmed, msg = rescue_result(end.get("product"), identity)
+                ui(dev_var.set, f"FM-1: {identity}" if confirmed else "FM-1: startup not confirmed")
+                ui(set_tone, "ok" if confirmed else "off")
                 ui(status.set, msg)
                 ui(messagebox.showinfo, "FM-1 Switch", msg)
             elif end and "did not appear" in (end.get("error") or "") and via == "usb":
@@ -902,6 +974,7 @@ def main():
         """the unbrick guide: 1 listen to the FM-1, 2 ask only what it did not say, 3 one thing to try"""
         if state["busy"] and start != "rescue_failed":      # (that one comes as a rescue ends)
             return
+        port = selected_port()
         g = dialog("FM-1 Switch – Check and unbrick", 660, 480)
         body = ttk.Frame(g, padding=(px(20), px(16)))
         body.pack(fill="both", expand=True)
@@ -936,7 +1009,7 @@ def main():
             def work():
                 probe_ok = R.uboot_present() is not None
                 try:
-                    st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 8)
+                    st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 8, port=port)
                 except Exception:       # (a MIDI port another app holds)
                     st, ident = "none", None
                 ui(found, st, ident, probe_ok)
@@ -972,7 +1045,7 @@ def main():
             def watch():
                 while live["open"] and live["page"] == "ask":
                     try:
-                        st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 0)
+                        st, ident = diagnose(backend, R.uboot_present if probe_ok else None, 0, port=port)
                     except Exception:
                         st, ident = "none", None
                     if st != "none":
@@ -1041,13 +1114,14 @@ def main():
 
         def work():
             try:
-                install(backend, pkg, step)
+                install(backend, pkg, step, port=port)
             except I.InstallError as e:
                 ui(status.set, f"Error: {e}")
                 ui(messagebox.showerror, "FM-1 Switch", str(e))
             except Exception as e:
                 ui(status.set, f"Error: {e}")
             ui(busy, False)
+        port = selected_port()
         threading.Thread(target=work, daemon=True).start()
 
     def add_folder():
@@ -1071,17 +1145,14 @@ def main():
         + "\n\nSource and licence: github.com/Saintpid/FM1-Switch (GPL-3.0)")).pack(side="right")
 
     def closing():
-        if state["rescue"] and not messagebox.askyesno(
-                "FM-1 Switch", "A rescue is running as administrator. Closing the window does not stop it "
-                               "(Stop does, while it waits). Close anyway?"):
-            return
-        if state["busy"] and not state["rescue"] and not messagebox.askyesno(
-                "FM-1 Switch", "An update is running. Closing now leaves the FM-1 in update mode "
-                               "(install again to finish). Close anyway?"):
+        if state["busy"]:
+            messagebox.showinfo("FM-1 Switch", "Please keep this window open until the operation finishes. "
+                                "If a system permission dialog is open, you can approve or cancel it. "
+                                "During recovery, Stop is available while waiting for the device. "
+                                "Once writing starts, let it finish.", parent=root)
             return
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", closing)
-    refresh()
     d0 = rescue_dir()
     if not accepted(d0):
         if not messagebox.askokcancel("FM-1 Switch – read this first", DISCLAIMER + "\n\nOK: I accept this. "
@@ -1089,6 +1160,18 @@ def main():
             root.destroy()
             return
         accept(d0)
+    status.set("Preparing MIDI and firmware folders. Firmware has not been changed.")
+    root.update_idletasks()
+    if mac and not messagebox.askokcancel(
+            "FM-1 Switch – Prepare access",
+            "Next, FM-1 Switch will open MIDI and look for firmware files in its folders, including "
+            "Downloads. macOS may ask for access. Take your time reading each request: no firmware "
+            "is being installed and no device timer is running.\n\n"
+            "Recovery asks separately for administrator access when you start it.", parent=root):
+        root.destroy()
+        return
+    backend, midi_err = open_midi()
+    refresh()
     check_device(0)
     root.mainloop()
 
