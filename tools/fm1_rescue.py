@@ -22,7 +22,8 @@ on hardware:
 
   1. JieLi's flash loader (wl82loader.bin, from github.com/kagaimiq/jl-uboot-tool, downloaded
      and checked against its hash) is loaded into RAM and started;
-  2. the chip key must be 980F and the flash 856014 (1 MiB), or nothing is done;
+  2. the chip key must be 980F and the flash a known FM-1 1 MiB part;
+     UCUN writes require explicit experimental opt-in and direct USB;
   3. the whole flash is read and saved as a backup before anything else;
   4. only 4 KiB sectors in [0x4000, 0x93000) that differ from V15 are written (the bootloader below
      0x4000 and the device data above 0x93000 are never touched; a difference below 0x4000 stops
@@ -31,12 +32,14 @@ on hardware:
 """
 import argparse
 import hashlib
+import json
 import os
 import struct
 import sys
 import time
 import tempfile
 import urllib.request
+import uuid
 import zlib
 
 VID, PID = 0x4C4A, 0x8057
@@ -50,6 +53,8 @@ LOADER_SHA256 = "d41da6126760c9d66660bcc0cac8d27d221806c5e369a8036921efe68dca537
 LOADER_ADDR, LOADER_ARG = 0x1C02000, 0x0001
 
 FLASH_SIZE = 0x100000
+FM1_FLASH = {0x856014: "Puya P25Q80H", 0xB36014: "UCUN UC25HQ80"}
+UCUN_FLASH = 0xB36014
 # M-VAVE's SMK-37 (Pro, Elite, MKE-P37) has the FM-1's chip, key and UBOOT, but another flash map, its
 # factory calibration at 0xC1000 (marker "trimdat" at 0xC1224) and, on the unit tried, flash EB6014
 KEYBOARD_FLASH = 0xEB6014
@@ -563,12 +568,35 @@ class Stopped(Fail):
     pass
 
 
-def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
-           strict_head=True):
-    """Everything in one session: the FM-1 leaves UBOOT (and crashes again) as soon as it is let go.
-    step(kind, value): "backup" path, "write" percent, "done" (FM-1 Switch's progress).
-    strict_head: the head must already be V15's (for V15); otherwise the package's head is ignored
-    and the FM-1's own stays, as Felucca's update loader does."""
+def flash_info(key, typ, fid):
+    """Identification only: a known part does not establish firmware compatibility."""
+    return {"chip_key": f"{key:04X}", "flash_type": typ, "jedec_id": f"{fid:06X}",
+            "flash_name": FM1_FLASH.get(fid, "M-VAVE keyboard flash" if fid == KEYBOARD_FLASH else "Unknown"),
+            "known_fm1_part": key == 0x980F and typ == 3 and fid in FM1_FLASH,
+            "capacity_bytes": FLASH_SIZE if fid in FM1_FLASH or fid == KEYBOARD_FLASH else None,
+            "experimental": fid == UCUN_FLASH, "firmware_compatibility": "unknown"}
+
+
+def save_report(path, data, owner=None):
+    with open(path, "x", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    give_owner(path, owner)
+
+
+def give_owner(path, owner):
+    if owner:
+        try:
+            os.chown(path, *owner)
+        except (OSError, AttributeError):
+            pass
+
+
+def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, image=None):
+    """Explicit UBOOT operation: RAM loader, identification, two reads, saved-file verification.
+    No flash erase/program or run-app command. Unknown chips get an identification report only."""
     step = step or (lambda *a: None)
     vendor, product = dev.inquiry()
     say(f"  device: {vendor} {product}")
@@ -576,12 +604,21 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
         raise Fail(f"not a WL82 UBOOT ({vendor!r})")
     dev.start_loader(loader)
     key, typ, fid = dev.chip()
-    say(f"  chip key {key:04X}, flash type {typ}, id {fid:06X}")
+    info = flash_info(key, typ, fid)
+    say(f"  chip key {key:04X}, flash type {typ}, id {fid:06X}: {info['flash_name']}")
+    report = os.path.join(backup_dir, f"fm1-hardware-{uuid.uuid4().hex}.json")
+    save_report(report, {"schema": 1, "hardware": info,
+                        "transport": "transporter" if isinstance(dev, Transporter) else "usb",
+                        "loader_sha256": sha256(loader),
+                        "purpose": "identification; no flash written by this probe"}, owner)
+    step("hardware", {**info, "report": report})
+    say(f"  hardware report: {report}")
     if fid == KEYBOARD_FLASH:
         raise Fail(KEYBOARD)
-    if (key, typ, fid) != (0x980F, 3, 0x856014):
-        raise Fail("this is not the FM-1's chip and flash (expected key 980F, type 3, id 856014); nothing written")
-    if not app_key_ok(image, key):
+    if not info["known_fm1_part"]:
+        raise Fail("this is not the FM-1's known chip and flash (expected key 980F, type 3, "
+                   f"id 856014 or B36014; found {key:04X}/{typ}/{fid:06X}); nothing written")
+    if image is not None and not app_key_ok(image, key):
         raise Fail("this firmware is not for this chip (its app area does not decrypt with key "
                    f"{key:04X}); nothing written")
     say("  reading the whole flash ...")
@@ -603,15 +640,34 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
             raise Fail("saved backup did not verify; nothing written")
     with open(path + ".sha256", "x", encoding="ascii") as f:
         f.write(sha256(now) + "  " + os.path.basename(path) + "\n")
-    if owner:                                                # written as root: give it to the user
-        try:
-            os.chown(path, *owner)
-        except (OSError, AttributeError):
-            pass
+    for p in (path, path + ".sha256"):
+        give_owner(p, owner)
+    save_report(path + ".json", {"schema": 1, "hardware": info, "hardware_report": report,
+                               "backup_file": os.path.basename(path), "backup_bytes": len(now),
+                               "backup_sha256": sha256(now), "matching_full_reads": 2,
+                               "saved_file_verified": True}, owner)
     say(f"  backup saved: {path} ({time.time() - t0:.1f} s)")
     step("backup", path)
     if now[TRIM_AT:TRIM_AT + len(TRIM_MARK)] == TRIM_MARK:  # its calibration: the same flash part as an FM-1's
         raise Fail(f"{KEYBOARD} (the backup is kept)")
+    return now, info, path
+
+
+def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
+           strict_head=True, allow_ucun=False):
+    """Back up before writing only application sectors. UCUN writes are experimental and opt-in.
+    V15 requires the exact protected head; other firmware keeps the device's own head."""
+    step = step or (lambda *a: None)
+    now, info, _ = inspect_backup(dev, loader, backup_dir, say, step, owner, image)
+    if info["experimental"] and (write or confirm is not None):
+        if isinstance(dev, Transporter):
+            raise Fail("UCUN recovery through the adapter is not supported; use direct USB. "
+                       "The backup is kept; nothing written")
+        if not allow_ucun:
+            raise Fail("UCUN UC25HQ80 detected. Backup verified; nothing written. Recovery on this chip "
+                       "is experimental: review the backup, then explicitly allow UCUN recovery "
+                       "(--allow-ucun-write in the CLI). Use firmware with UCUN support.")
+        say("  EXPERIMENTAL UCUN recovery: flash verification does not prove persistent saves.")
     diff = [a for a in range(0, APP_END, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
     low = [a for a in diff if a < WRITE_MIN]
     if low and strict_head:
@@ -839,6 +895,8 @@ def open_device(timeout, say=print, stop=None):
             raise Stopped("stopped: nothing was written")
         if win:
             disks = windows_uboot_disks()
+            if len(disks) > 1:
+                raise Fail("multiple UBOOT devices found: connect only the target device; nothing written")
             if disks:
                 say(f"found it after {time.time() - t0:.1f} s ({disks[0]})")
                 try:
@@ -854,8 +912,11 @@ def open_device(timeout, say=print, stop=None):
                     continue
             time.sleep(0.05)
             continue
-        dev = usb.core.find(idVendor=VID, idProduct=PID, backend=be)
-        if dev is not None:
+        devices = list(usb.core.find(idVendor=VID, idProduct=PID, backend=be, find_all=True) or [])
+        if len(devices) > 1:
+            raise Fail("multiple UBOOT devices found: connect only the target device; nothing written")
+        if devices:
+            dev = devices[0]
             say(f"found it after {time.time() - t0:.1f} s")
             try:
                 try:
@@ -947,6 +1008,10 @@ def main(argv=None):
                                                "(any other FM-1 package with --any-firmware)")
     ap.add_argument("--write", action="store_true", help="write it (without it: check and back up only)")
     ap.add_argument("--ask", action="store_true", help="after the check and the backup, ask before writing")
+    ap.add_argument("--inspect", action="store_true",
+                    help="identify the flash and save a verified backup without a firmware package; no flash writes")
+    ap.add_argument("--allow-ucun-write", action="store_true",
+                    help="explicitly allow EXPERIMENTAL UCUN UC25HQ80 recovery over direct USB")
     ap.add_argument("--download", action="store_true", help="fetch V15 from M-VAVE (checked) if no package is given")
     ap.add_argument("--any-firmware", action="store_true",
                     help="allow another FM-1 package than V15 (Wild, NB303, n001se, FiMba-1, another "
@@ -962,22 +1027,26 @@ def main(argv=None):
     ap.add_argument("--progress", help=argparse.SUPPRESS)          # FM-1 Switch: events to this file
     ap.add_argument("--owner", help=argparse.SUPPRESS)             # uid:gid to give the backup to
     args = ap.parse_args(argv)
+    if args.inspect and (args.write or args.ask or args.package or args.download or args.allow_ucun_write):
+        ap.error("--inspect cannot be combined with a package, --download, --write, --ask or --allow-ucun-write")
     pf = ProgressFile(args.progress) if args.progress else None
     say = pf.say if pf else (lambda *a, **k: print(*a, **k, flush=True))
     try:
         pkg = args.package
-        if not pkg:
+        image, kind, product = None, None, None
+        if not pkg and not args.inspect:
             if not args.download:
                 ap.error("give the V15 package, or --download")
             pkg = download_stock(os.getcwd(), say)
-        image, kind, product = load_package(pkg)
-        if kind != "v15" and not args.any_firmware:
-            raise Fail(f"{pkg} is {product}, not M-VAVE's V15: --any-firmware puts another FM-1 firmware back")
-        say(f"  firmware: {product} ({'M-VAVE V15' if kind == 'v15' else kind})")
+        if not args.inspect:
+            image, kind, product = load_package(pkg)
+            if kind != "v15" and not args.any_firmware:
+                raise Fail(f"{pkg} is {product}, not M-VAVE's V15: --any-firmware puts another FM-1 firmware back")
+            say(f"  firmware: {product} ({'M-VAVE V15' if kind == 'v15' else kind})")
         if kind == "other":
             say("  (not V15 and not Felucca-based: if it does not start, it may not fall back to the update "
                 "mode by itself)")
-        backup_dir = args.backup_dir or os.path.dirname(os.path.abspath(pkg))
+        backup_dir = args.backup_dir or (os.getcwd() if args.inspect else os.path.dirname(os.path.abspath(pkg)))
         loader = get_loader(args.loader, backup_dir, say)
         via = args.via
         if via == "transporter":
@@ -1011,11 +1080,18 @@ def main(argv=None):
             try:
                 if via == "transporter":
                     dev.ensure_uboot(args.wait, say, stop)
-                rescue(dev, image, loader, args.write, backup_dir, say=say,
-                       confirm=ask if args.ask else None, step=pf.step if pf else None, owner=owner,
-                       strict_head=kind == "v15")
+                details = {}
+                if args.inspect:
+                    _, info, path = inspect_backup(dev, loader, backup_dir, say=say,
+                                                  step=pf.step if pf else None, owner=owner)
+                    details = {"hardware": info, "backup": path}
+                    say("  Backup verified. No flash written. Power-cycle before using the FM-1 again.")
+                else:
+                    rescue(dev, image, loader, args.write, backup_dir, say=say,
+                           confirm=ask if args.ask else None, step=pf.step if pf else None, owner=owner,
+                           strict_head=kind == "v15", allow_ucun=args.allow_ucun_write)
                 if pf:
-                    pf.put(end="ok", product=product)
+                    pf.put(end="ok", product=product, operation="inspect" if args.inspect else "rescue", **details)
                 return 0
             except Stopped:
                 raise

@@ -26,6 +26,38 @@ Ready-made installers are distributed through [Noisebud on Patreon](https://www.
 GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
 uploading installers or application binaries.
 
+### Hardware identification and backup in 1.4.0
+
+**Hardware / backup…** reads the chip key, flash type and JEDEC ID when the device already reaches
+the chip's UBOOT mode. It starts a hash-checked program in device RAM, then saves two matching full
+flash reads and verifies the saved file. It does not erase or program flash and needs no firmware
+package. Administrator access is requested separately; the device timer starts after approval.
+Power-cycle afterwards. A working MIDI firmware does not expose its flash ID through this tool;
+do not damage or interrupt a working firmware to force UBOOT.
+
+The report names Puya P25Q80H (`856014`), UCUN UC25HQ80 (`B36014`) and the known keyboard flash
+(`EB6014`). Unknown parts and keyboards are refused. Identification reports are saved even for
+refused parts; backups of supported parts have `.sha256` and `.json` files with chip details and
+verification metadata beside them. Keep full backups private: they contain device and user data.
+
+Some older community firmware and update loaders reject UCUN flash, which can prevent updates or
+leave saves in RAM only. A successful install or matching MIDI identity does not establish persistent
+saves. Prefer a release with support confirmed by its author; see
+[the compatibility investigation](docs/HARDWARE_COMPATIBILITY.md). Failed update handoffs include
+this possible explanation, without assuming which chip is fitted.
+
+In **Rescue…**, UCUN writes require the separate **Allow experimental UCUN UC25HQ80 recovery**
+choice as well as the usual risk confirmation. If UCUN is detected with this unchecked, recovery
+saves a verified backup and refuses writes. Puya recovery writes normally. The UCUN recovery path
+has simulation coverage; actual UCUN device acceptance is pending.
+It is available only over direct USB; UCUN writes through the adapter are refused. All existing
+protected-region, chip key/type, keyboard and V15 head checks still apply. Multiple UBOOT devices
+are refused: connect only the intended target.
+
+From source, as administrator/root: `python tools/fm1_rescue.py --inspect --backup-dir BACKUP_FOLDER`
+(use an existing folder). Normal CLI recovery of a UCUN part additionally requires
+`--allow-ucun-write` with `--write`. There is no automatic firmware patching or settings reset.
+
 ### Recovery and access in 1.3.0
 
 On macOS, access preparation explains the MIDI and folder requests before they
