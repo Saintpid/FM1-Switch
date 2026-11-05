@@ -168,6 +168,17 @@ ok("--any-firmware" in S.rescue_args("w.fwsc", rd, "p", True) and "--any-firmwar
 ok(not S.accepted(rd) and (S.accept(rd) or S.accepted(rd)) and "OWN RISK" in S.DISCLAIMER and "NO WARRANTY" in S.DISCLAIMER,
    "disclaimer: asked once, remembered; own risk, no warranty")
 a = S.rescue_args(rd / "FM-1-V15.fwsc", rd, "/tmp/p.jsonl")
+inspection = S.rescue_args(None, rd, "p", inspect=True, any_firmware=True, allow_ucun=True)
+ok("--inspect" in inspection and "--write" not in inspection and "--any-firmware" not in inspection
+   and "--allow-ucun-write" not in inspection and "None" not in inspection,
+   "Hardware / backup: helper command cannot request writes or a package")
+ok("--allow-ucun-write" not in a
+   and "--allow-ucun-write" in S.rescue_args("v.fwsc", rd, "p", allow_ucun=True),
+   "UCUN recovery: explicit opt-in only")
+err = I.InstallError("stopped", "stopped answering after 0 requests")
+ok("UCUN" in S.install_error_text(err) and "does not identify" in S.install_error_text(err)
+   and S.install_error_text(I.InstallError("model", "wrong model")) == "wrong model",
+   "update diagnosis: possible UCUN incompatibility, no inferred chip ID")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
    and a[a.index("--backup-dir") + 1] == str(rd), "rescue: V15, --write, the backup folder, the progress file")
 cmd = S.helper_command(a, "win32")

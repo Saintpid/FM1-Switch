@@ -10,11 +10,13 @@ the head differs, nothing when the chip is another one or the firmware is for an
 FM-1's own head kept for any other firmware, and the final image.
   python3 tests/rescue_test.py"""
 import ctypes as C
+import json
 import os
 import random
 import struct
 import sys
 import tempfile
+import types
 import zlib
 from unittest.mock import patch
 from pathlib import Path
@@ -38,11 +40,12 @@ LOADER = bytes(random.Random(1).randrange(256) for _ in range(R.LOADER_SIZE))
 class FakeUboot:
     """the FM-1 in UBOOT: a 1 MiB flash, the ROM until the loader is started, then the loader"""
 
-    def __init__(self, flash, key=0x980F, fid=0x856014):
+    def __init__(self, flash, key=0x980F, fid=0x856014, typ=3):
         self.flash = bytearray(flash)
         self.ram = {}
         self.mode = "rom"
         self.key, self.fid = key, fid
+        self.typ = typ
         self.erased, self.writes, self.ran = [], [], False
 
     def reply(self, cmd, p=b""):
@@ -80,7 +83,7 @@ class FakeUboot:
             R.crc_cipher(k)
             return self.reply(cmd, bytes([0, 0, 0, 0, k[1], k[0]]))
         if cmd == R.CMD_GET_ONLINE_DEVICE:
-            return self.reply(cmd, bytes([3, 0]) + struct.pack("<I", self.fid))
+            return self.reply(cmd, bytes([self.typ, 0]) + struct.pack("<I", self.fid))
         if cmd == R.CMD_ERASE_SECTOR:
             addr = struct.unpack(">I", a[:4])[0]
             self.erased.append(addr)
@@ -275,7 +278,7 @@ for name, make in (("USB", lambda d: d), ("Windows", lambda d: R.WinScsi(r"\\.\P
     backup = [s[1] for s in steps if s[0] == "backup"]
     ok(done and backup and open(backup[0], "rb").read() == now, f"{name}: the whole flash backed up first")
     ok(open(backup[0] + ".sha256").read().split()[0] == R.sha256(now)
-       and steps[:2] == [("backup_read", 1), ("backup_read", 2)],
+       and [s for s in steps if s[0] == "backup_read"] == [("backup_read", 1), ("backup_read", 2)],
        f"{name}: two backup passes and saved checksum")
     ok(bytes(dev.flash) == image + now[R.APP_END:], f"{name}: the flash is V15, the device data kept")
     ok(dev.erased == [0x92000, 0x40000, 0x6000, 0x5000], f"{name}: only the 4 differing sectors, high to low")
@@ -320,6 +323,91 @@ try:
     ok(False, "another flash chip: refused")
 except R.Fail as e:
     ok("not the FM-1" in str(e) and not dev.erased, "another flash chip: refused")
+
+# ---- hardware identification, read-only backup, experimental UCUN recovery
+for fid in (0x856014, 0xB36014):
+    image, now = flashes()
+    dev = FakeUboot(now, fid=fid)
+    steps = []
+    saved, info, path = R.inspect_backup(R.Uboot(dev), LOADER, tmp, say=lambda *a, **k: None,
+                                         step=lambda *a: steps.append(a))
+    meta = json.loads(Path(path + ".json").read_text())
+    ok(saved == now and not dev.erased and not dev.writes and not dev.ran
+       and info["jedec_id"] == f"{fid:06X}" and info["known_fm1_part"]
+       and meta["backup_sha256"] == R.sha256(now) and meta["matching_full_reads"] == 2
+       and meta["saved_file_verified"] and meta["backup_bytes"] == R.FLASH_SIZE,
+       f"{fid:06X}: identify and verify full backup without erase/program/runapp")
+    ok(json.loads(Path(steps[0][1]["report"]).read_text())["hardware"] == info
+       and meta["hardware"] == info and info["firmware_compatibility"] == "unknown",
+       f"{fid:06X}: measured hardware in standalone report and backup metadata")
+
+dev = FakeUboot(now, fid=R.UCUN_FLASH)
+try:
+    R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
+    ok(False, "UCUN write requires opt-in")
+except R.Fail as e:
+    ok("experimental" in str(e) and "Backup verified" in str(e) and not dev.erased and not dev.writes,
+       "UCUN default: backup verified, experimental write refused")
+dev = FakeUboot(now, fid=R.UCUN_FLASH)
+ok(R.rescue(R.Uboot(dev), image, LOADER, True, tmp, allow_ucun=True, say=lambda *a, **k: None)
+   and dev.ran and bytes(dev.flash) == image + now[R.APP_END:]
+   and all(R.WRITE_MIN <= a < R.APP_END for a in dev.erased + dev.writes),
+   "UCUN opt-in: simulated recovery, protected regions retained")
+dev = FakeUboot(now, fid=R.UCUN_FLASH)
+try:
+    R.rescue(R.Transporter(FakeTransporter(dev)), image, LOADER, True, tmp,
+             allow_ucun=True, say=lambda *a, **k: None)
+    ok(False, "UCUN adapter writes refused")
+except R.Fail as e:
+    ok("direct USB" in str(e) and not dev.erased and not dev.writes,
+       "UCUN adapter: opt-in still cannot enable unverified adapter writes")
+
+for key, fid in ((0x1234, 0xB36014), (0x980F, 0), (0x980F, 0xFFFFFF), (0x980F, 0xB36015)):
+    dev = FakeUboot(now, key=key, fid=fid)
+    steps = []
+    try:
+        R.inspect_backup(R.Uboot(dev), LOADER, tmp, say=lambda *a, **k: None,
+                         step=lambda *a: steps.append(a))
+        ok(False, f"unknown {key:04X}/{fid:06X} refused")
+    except R.Fail:
+        report = json.loads(Path(steps[0][1]["report"]).read_text())
+        ok(not dev.erased and not dev.writes and not any(k == "backup_read" for k, _ in steps)
+           and not report["hardware"]["known_fm1_part"],
+           f"unknown {key:04X}/{fid:06X}: report saved, no flash read or write")
+
+# A backup must not be called verified, or permit writes, if disk readback is corrupt.
+dev = FakeUboot(now, fid=R.UCUN_FLASH)
+real_open = open
+def corrupt_saved(path, mode="r", *a, **kw):
+    if str(path).endswith(".bin") and mode == "rb":
+        import io
+        return io.BytesIO(b"corrupt disk readback")
+    return real_open(path, mode, *a, **kw)
+with patch("builtins.open", side_effect=corrupt_saved):
+    try:
+        R.rescue(R.Uboot(dev), image, LOADER, True, tmp, allow_ucun=True, say=lambda *a, **k: None)
+        ok(False, "UCUN corrupt saved backup refused")
+    except R.Fail as e:
+        ok("saved backup did not verify" in str(e) and not dev.erased and not dev.writes,
+           "UCUN corrupt saved backup: refused before erase/program")
+
+for case in ("type", "head", "key", "calibration"):
+    image, now = flashes()
+    if case == "head":
+        now = bytearray(now)
+        now[0x1234] ^= 1
+    if case == "key":
+        image = bytearray(image)
+        app_head(image, key=0x1234)
+    if case == "calibration":
+        now = bytearray(now)
+        now[R.TRIM_AT:R.TRIM_AT + len(R.TRIM_MARK)] = R.TRIM_MARK
+    dev = FakeUboot(now, fid=R.UCUN_FLASH, typ=2 if case == "type" else 3)
+    try:
+        R.rescue(R.Uboot(dev), image, LOADER, True, tmp, allow_ucun=True, say=lambda *a, **k: None)
+        ok(False, f"UCUN {case}: safety gate retained")
+    except R.Fail:
+        ok(not dev.erased and not dev.writes, f"UCUN {case}: safety gate retained with opt-in")
 
 # ---- M-VAVE's SMK-37: the FM-1's chip, but never an FM-1 firmware on it
 dev = FakeUboot(now, fid=R.KEYBOARD_FLASH)
@@ -470,6 +558,47 @@ with patch.object(R, "load_package", return_value=(image, "v15", "FM-1_015")), \
 events, _ = R.read_progress(progress)
 ok(code == 1 and not opened.called and not any(e.get("step") == "ready" for e in events),
    "permission denied: no readiness, device timer or writes")
+
+# Both direct USB backends refuse an ambiguous target before opening it.
+fake_usb = types.ModuleType("usb")
+fake_usb.core, fake_usb.util = types.ModuleType("usb.core"), types.ModuleType("usb.util")
+fake_usb.core.find = lambda **kw: [object(), object()]
+with patch.dict(sys.modules, {"usb": fake_usb, "usb.core": fake_usb.core, "usb.util": fake_usb.util}), \
+     patch.object(R.sys, "platform", "darwin"), patch.object(R, "backend", return_value=object()), \
+     patch.object(R, "Bot") as opened:
+    try:
+        R.open_device(1, say=lambda *a, **k: None)
+        ok(False, "multiple USB UBOOT devices refused")
+    except R.Fail as e:
+        ok("multiple" in str(e) and not opened.called, "multiple USB UBOOT devices: no target opened")
+with patch.object(R.sys, "platform", "win32"), \
+     patch.object(R, "windows_uboot_disks", return_value=["device1", "device2"]), \
+     patch.object(R, "WinScsi") as opened:
+    try:
+        R.open_device(1, say=lambda *a, **k: None)
+        ok(False, "multiple UBOOT devices refused")
+    except R.Fail as e:
+        ok("multiple" in str(e) and not opened.called, "multiple UBOOT devices: no arbitrary target opened")
+# --inspect uses no package or stock download and cannot be combined with writing.
+dev = FakeUboot(now, fid=R.UCUN_FLASH)
+progress = str(Path(tmp) / "inspect.jsonl")
+with patch.object(R, "get_loader", return_value=LOADER), \
+     patch.object(R, "is_admin", return_value=True), \
+     patch.object(R.sys, "platform", "win32"), \
+     patch.object(R, "open_device", return_value=dev), \
+     patch.object(R, "load_package") as loaded, patch.object(R, "download_stock") as downloaded:
+    code = R.main(["--inspect", "--backup-dir", tmp, "--progress", progress, "--tries", "1"])
+events, _ = R.read_progress(progress)
+ok(code == 0 and not loaded.called and not downloaded.called and not dev.erased and not dev.writes
+   and events[-1]["operation"] == "inspect" and Path(events[-1]["backup"]).exists(),
+   "CLI inspect: backup without package/download/erase/program")
+for extra in (["--write"], ["--ask"], ["--allow-ucun-write"], ["firmware.fwsc"]):
+    with patch.object(R, "open_device") as opened:
+        try:
+            R.main(["--inspect", *extra])
+            ok(False, f"inspect rejects {extra}")
+        except SystemExit as e:
+            ok(e.code == 2 and not opened.called, f"inspect rejects {extra} before device access")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

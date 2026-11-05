@@ -2,6 +2,19 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.0
+
+- **Hardware / backup…** identifies the measured flash in an explicit UBOOT session and saves two
+  matching full reads, a disk-verified backup, SHA-256 sidecar and hardware metadata without flash
+  writes or a firmware package. Unknown chips get a hardware report and are refused.
+- Names Puya P25Q80H (856014), UCUN UC25HQ80 (B36014) and the known keyboard flash (EB6014).
+  Chip identity does not prove firmware compatibility or persistent saves.
+- **Experimental UCUN recovery** is available over direct USB only after explicit opt-in. Backup,
+  chip key/type, keyboard calibration, V15 head and protected-region checks remain mandatory.
+  UCUN writes through the transporter are refused. Actual UCUN device acceptance is pending.
+- Recovery refuses multiple UBOOT devices rather than selecting one. Failed update handoffs explain
+  possible alternate-flash incompatibility without diagnosing a chip from an error alone.
+
 ## 1.3.2
 
 - **M-VAVE's SMK-37 keyboards (experimental).** The SMK-37 Pro, SMK-37 Elite, MKE-P37 and Starrykey
