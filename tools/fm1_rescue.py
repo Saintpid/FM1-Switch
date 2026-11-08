@@ -22,7 +22,8 @@ on hardware:
 
   1. JieLi's flash loader (wl82loader.bin, from github.com/kagaimiq/jl-uboot-tool, downloaded
      and checked against its hash) is loaded into RAM and started;
-  2. the chip key must be 980F and the flash 856014 (1 MiB), or nothing is done;
+  2. the chip key must be 980F and the flash 856014 (Puya, the first units) or B36014 (UCUN,
+     those sold since autumn 2026; both 1 MiB), or nothing is done;
   3. the whole flash is read and saved as a backup before anything else;
   4. only 4 KiB sectors in [0x4000, 0x93000) that differ from V15 are written (the bootloader below
      0x4000 and the device data above 0x93000 are never touched; a difference below 0x4000 stops
@@ -53,6 +54,9 @@ FLASH_SIZE = 0x100000
 # M-VAVE's SMK-37 (Pro, Elite, MKE-P37) has the FM-1's chip, key and UBOOT, but another flash map, its
 # factory calibration at 0xC1000 (marker "trimdat" at 0xC1224) and, on the unit tried, flash EB6014
 KEYBOARD_FLASH = 0xEB6014
+# the FM-1's parts: Puya P25Q80H on the first units, UCUN UC25HQ80 on those sold since autumn 2026
+# (1 MiB, the same commands; Felucca 7435517, fm1-base #35). An SMK-37 on either is still told by its calibration.
+FLASH_IDS = (0x856014, 0xB36014)
 TRIM_MARK, TRIM_AT = b"trimdat\0", 0xC1224
 KEYBOARD = ("this is an M-VAVE SMK-37 keyboard (or an MKE-P37), not an FM-1: Rescue is for the FM-1 "
             "only, and an FM-1 firmware must never go on the keyboard; nothing written")
@@ -579,8 +583,8 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
     say(f"  chip key {key:04X}, flash type {typ}, id {fid:06X}")
     if fid == KEYBOARD_FLASH:
         raise Fail(KEYBOARD)
-    if (key, typ, fid) != (0x980F, 3, 0x856014):
-        raise Fail("this is not the FM-1's chip and flash (expected key 980F, type 3, id 856014); nothing written")
+    if (key, typ) != (0x980F, 3) or fid not in FLASH_IDS:
+        raise Fail("this is not the FM-1's chip and flash (expected key 980F, type 3, id 856014 or B36014); nothing written")
     if not app_key_ok(image, key):
         raise Fail("this firmware is not for this chip (its app area does not decrypt with key "
                    f"{key:04X}); nothing written")

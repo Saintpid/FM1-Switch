@@ -2,6 +2,14 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.3.3
+
+- **Rescue on the newer FM-1s.** FM-1s sold since autumn 2026 (mostly through AliExpress) have
+  another flash chip, a UC25HQ80 (flash id B36014) in place of the first units' Puya (856014). Rescue
+  refused those as "not the FM-1's chip and flash"; it now accepts both. Everything else is checked
+  as before (chip key, a full backup first, SMK-37 keyboards still refused). Not yet tried on a newer
+  unit: tell us how it goes.
+
 ## 1.3.2
 
 - **M-VAVE's SMK-37 keyboards (experimental).** The SMK-37 Pro, SMK-37 Elite, MKE-P37 and Starrykey
