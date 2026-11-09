@@ -1,5 +1,56 @@
 # FM-1 Switch project memory
 
+## 2026-11-09 — 1.4.1 firmware flash-support check
+
+Built on the 1.4.0 branch with main (1.3.3) merged; 1.4.0's UCUN opt-in kept over 1.3.3's plain
+accept. `fm1_rescue.flash_support` decrypts the package app area with the chip key and looks for
+the exact-ID gate's 32-bit constants. Rescue blocks unsupported firmware before reading/writing;
+the GUI install warns (default No) and names the last Hardware / backup flash. Local packages:
+Wild >= FM-1_866 and NB303 none (<= 906) carry B36014; n001se 1.7.1 (825/826) does not. Tests are
+simulations; no hardware was probed or flashed.
+
+## 2026-11-05 — 1.4.0 hardware identification and experimental UCUN recovery
+
+Implemented Hardware / backup (CLI --inspect), an explicit UBOOT RAM-loader
+session with no flash writes or package requirement. Measured key/type/ID,
+named Puya/UCUN/known keyboard part, standalone hardware JSON even on rejection,
+and two matching reads + disk readback + backup SHA-256/metadata for known FM-1
+parts. Unknown parts and keyboards remain refused. Multiple UBOOT devices stop
+before a target is opened. MIDI identity still gives no JEDEC ID.
+
+UCUN B36014 recovery requires explicit experimental opt-in (--allow-ucun-write),
+direct USB only. Default keeps the verified backup and refuses writes; adapter
+writes remain refused with opt-in. Existing key/type, app-key, calibration,
+V15 head and protected range gates remain. The GUI explains possible alternate
+flash incompatibility on update handoff errors without inferring a chip ID.
+
+Simulation tests cover these paths; real UCUN writes, persistent saves, actual
+Mac packaging/installed native architecture and permission UX remain acceptance
+work. No firmware patching, settings erasure or real-device operations added
+to verification. See docs/HARDWARE_COMPATIBILITY.md and README.md.
+
+Local validation: install/switch/rescue/export suites passed on Windows; the
+export suite also passed Builder's gate on its generated source archive.
+The new dialogs were visually checked with device access mocked out. This is
+not an installer deployment or acceptance on an actual Mac/device.
+
+## 2026-11-05 — Alternate flash investigation; documentation only
+
+See `docs/HARDWARE_COMPATIBILITY.md` for primary sources and proposed work.
+UCUN UC25HQ80 (JEDEC B36014) compatibility is backed by Melodee's exact-ID
+gate fix, release 1.6.0 and upstream hardware reports (including 1.6.1).
+SLOOP PR 241 covers app, update loader and USB recovery; do not infer a fixed
+release from a closed issue. A zero-request update failure can share this
+cause, but the screenshot does not prove it. Stock preset/sequence corruption
+after a downgrade remains a separate unconfirmed report.
+
+FM-1 Switch 1.3.2 MIDI identity exposes no flash ID; rescue still requires
+856014 and refuses B36014 before backup/write. No safety gate was relaxed.
+Version-specific firmware adaptation is feasible, but universal byte replacement
+is not a verified solution. Prefer corrected upstream packages; keep recovery
+support and firmware persistence compatibility as separate acceptance tasks.
+Documentation only: VERSION remains 1.3.2; no build, export or hardware operation.
+
 ## 2026-11-02 — Distribution decision
 
 GitHub is for source code; ready-made installers are distributed through Patreon.

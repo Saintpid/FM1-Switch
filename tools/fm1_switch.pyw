@@ -22,6 +22,7 @@ or root: the program starts itself again with --rescue for that).
   tools/export_switch_mac.cmd            to the Mac, where Build_FM1Switch_Mac.command makes FM1-Switch.app
                                          and its DMG (tools/build_switch_mac.sh)
 """
+import json
 import os
 import re
 import shlex
@@ -169,6 +170,56 @@ def install(backend, pkg, step, port=None):
     return up.install(dev, image, product, step)
 
 
+def flash_support(pkg, fid=R.UCUN_FLASH):
+    """("supported" | "unsupported" | "unknown", reason) of an FM-1 package for a flash part (cached)"""
+    cache = pkg.__dict__.setdefault("_flash", {})
+    if fid not in cache:
+        try:
+            image = R.package_flash_image(pkg.path.read_bytes())[:R.APP_END]
+            cache[fid] = R.flash_support(image, fid, pkg.kind)
+        except (OSError, R.Fail) as e:
+            cache[fid] = ("unknown", f"the package could not be read ({e})")
+    return cache[fid]
+
+
+def last_hardware(d):
+    """the newest Hardware / backup identification saved in folder d: (info, when) or None"""
+    best = None
+    try:
+        files = list(Path(d).glob("fm1-hardware-*.json"))
+    except OSError:
+        return None
+    for f in files:
+        try:
+            info = json.loads(f.read_text(encoding="utf-8"))["hardware"]
+            when = f.stat().st_mtime
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(info, dict) and (best is None or when > best[1]):
+            best = (info, when)
+    return best
+
+
+def flash_warning(pkg, hardware=None):
+    """Before a USB-MIDI install: the running firmware does not tell its flash part, so a package
+    whose exact-ID gate refuses UCUN UC25HQ80 gets a warning (None when nothing is known against it)"""
+    if pkg.model != "FM-1" or pkg.kind not in ("felucca", "v15"):
+        return None
+    support, why = flash_support(pkg)
+    if support != "unsupported":
+        return None
+    text = (f"{pkg.path.name} ({pkg.product}) does not support the UCUN UC25HQ80 flash (B36014): {why}.\n\n"
+            "FM-1s sold since autumn 2026 have this flash. On such a unit this firmware loses its saves "
+            "at power-off and the update may stop. Wild from FM-1_864 and NB303 from FM-1_908 support it.")
+    if hardware:
+        info, when = hardware
+        text += ("\n\nThe last FM-1 identified here (Hardware / backup, "
+                 f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}) has "
+                 f"{info.get('flash_name', '?')} ({info.get('jedec_id', '?')}).")
+    return text + ("\n\nThe FM-1 does not report its flash over MIDI. Install anyway only if this FM-1 "
+                   "has the Puya P25Q80H flash (856014).")
+
+
 STEP_TEXT = {"start": "Starting the update on {}", "check": "Checking the package ({} reads)",
              "loader": "Switching to update mode", "write": "Writing {}%", "reboot": "Restarting",
              "done": "Done: the FM-1 runs {}"}
@@ -203,6 +254,23 @@ def rescue_result(product, identity):
     return False, ("Flash verified. Startup has not been confirmed over MIDI. "
                    "If using an adapter, disconnect it after writing has finished, then reconnect "
                    "the FM-1 directly by USB. Check the screen and press Check / unbrick….")
+
+
+def install_error_text(error):
+    text = str(error)
+    if error.code in ("stopped", "lost", "noloader"):
+        text += ("\n\nSome FM-1 units use UCUN UC25HQ80 flash. Older firmware or update loaders "
+                 "may reject it, causing failed updates or saves lost after power-off. This error "
+                 "alone does not identify the chip. Hardware / backup… can read it if the device "
+                 "already reaches the chip's UBOOT mode. Use a release whose author confirms UCUN "
+                 "support; installing successfully does not prove that saves persist.")
+    return text
+
+
+def hardware_text(info):
+    return (f"{info['flash_name']} — JEDEC {info['jedec_id']}\n"
+            f"Chip key {info['chip_key']}, flash type {info['flash_type']}.\n"
+            "Firmware compatibility and persistent saves are not established by this identification.")
 
 
 def step_text(kind, value=None):
@@ -504,10 +572,12 @@ def helper_command(args, platform=sys.platform, sysctl=_sysctl_int):
     return native_prefix(platform, sysctl) + me + ["--rescue", *args]
 
 
-def rescue_args(target, d, progress, any_firmware=False, via="usb"):
-    a = [str(target), "--write", "--backup-dir", str(d), "--loader", str(d / R.LOADER_NAME),
+def rescue_args(target, d, progress, any_firmware=False, via="usb", inspect=False, allow_ucun=False):
+    a = (["--inspect"] if inspect else [str(target), "--write"]) + ["--backup-dir", str(d), "--loader", str(d / R.LOADER_NAME),
          "--wait", "300", "--tries", "5", "--progress", str(progress)]
-    if any_firmware:
+    if allow_ucun and not inspect:
+        a.append("--allow-ucun-write")
+    if any_firmware and not inspect:
         a.append("--any-firmware")
     if via != "usb":
         a += ["--via", via]
@@ -815,7 +885,7 @@ def main():
         d = rescue_dir()
         choices = rescue_choices(folders + [d])
         w = dialog("FM-1 Switch – Rescue" + (" through the adapter (experimental)" if via != "usb" else ""),
-                   680, 600)
+                   680, 680)
         w.grab_set()
         f = ttk.Frame(w, padding=(px(20), px(16)))
         f.pack(fill="both", expand=True)
@@ -862,6 +932,14 @@ def main():
                      "Not V15 and not Felucca-based: if it does not start, it may not fall back to the "
                      "chip's update mode by itself, and the next rescue may need the adapter.")
         box.bind("<<TreeviewSelect>>", picked)
+        ucun_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Allow experimental UCUN UC25HQ80 recovery (direct USB only)",
+                        variable=ucun_var).pack(anchor="w", pady=(px(10), 0))
+        ttk.Label(f, text="If UCUN is detected, leaving this unchecked saves a backup and refuses writes. "
+                  "Puya recovery writes normally. UCUN recovery has simulation coverage; actual device "
+                  "acceptance is pending. Choose firmware with "
+                  "confirmed UCUN support. Other chips are still refused.", style="Muted.TLabel",
+                  wraplength=wrap, justify="left").pack(anchor="w")
         ttk.Label(f, text="2  Your own risk", style="Head.TLabel").pack(anchor="w", pady=(px(16), 0))
         ttk.Label(f, text="The whole flash is saved first, the chip's boot code is never written, and nothing "
                           "is written unless the chip and its flash are the FM-1's. Even so, this can fail.",
@@ -884,7 +962,7 @@ def main():
             c = choices[i] if i is not None else None
             w.grab_release()
             w.destroy()
-            run_rescue(c, d, via)
+            run_rescue(c, d, via, allow_ucun=ucun_var.get())
         ttk.Label(f, text="Next: prepare files, request system access, verify two backups, then write. "
                   "You can read the system permission request at your own pace.",
                   style="Muted.TLabel", wraplength=wrap).pack(anchor="w", pady=(px(8), 0))
@@ -893,7 +971,20 @@ def main():
         go.pack(side="right")
         ttk.Button(row2, text="Cancel", command=w.destroy).pack(side="right", padx=(0, px(8)))
 
-    def run_rescue(target, d, via):
+    def do_inspect():
+        if state["busy"]:
+            return
+        if messagebox.askokcancel("FM-1 Switch – Hardware / backup",
+                "This reads the chip ID and saves two matching full flash reads as a verified backup. "
+                "It loads a checked program into device RAM; it does not erase or write flash.\n\n"
+                "Use this when the device already reaches the chip's UBOOT mode. A running MIDI "
+                "firmware does not expose its flash ID here. Do not interrupt a working firmware "
+                "to force this mode. Unknown chips and keyboards are refused.\n\n"
+                "Next: download the checked RAM loader and request administrator access. Power-cycle "
+                "the device afterwards. Keep full backups private: they contain device and user data.", parent=root):
+            run_rescue(None, rescue_dir(), "usb", inspect=True)
+
+    def run_rescue(target, d, via, inspect=False, allow_ucun=False):
         busy(True)
         port = selected_port()
         status.set("Preparing recovery files. Firmware has not been changed.")
@@ -901,14 +992,14 @@ def main():
         fd, prog = tempfile.mkstemp(prefix="fm1-rescue-", suffix=".jsonl")
         os.close(fd)
         state["rescue"] = prog
-        name = "M-VAVE's V15" if target is None or target.kind == "v15" else target.path.name
 
         def work():
             try:
-                path = target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip()))
+                path = None if inspect else (target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip())))
                 ui(status.set, "Getting JieLi's flash loader…")
                 R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
-                cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via))
+                cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via,
+                                                inspect=inspect, allow_ucun=allow_ucun))
                 ui_wait(status.set, "Waiting for system approval. Take your time with the permission dialog. "
                         "The device timer starts after access is granted; firmware has not been changed."
                         if via == "usb" else "Connecting to the adapter. Firmware has not been changed.")
@@ -918,14 +1009,17 @@ def main():
                 ui(end_rescue)
                 return
             state["rescue"] = prog
-            done, pos, end = {"code": None}, 0, None
+            done, pos, end, hardware = {"code": None}, 0, None, None
             t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
             t.start()
-            while True:
-                ev, pos = R.read_progress(prog, pos)
+            def handle_events(ev):
+                nonlocal end, hardware
                 for e in ev:
                     if "say" in e:
                         ui(status.set, e["say"])
+                    elif e.get("step") == "hardware":
+                        hardware = e["value"]
+                        ui(dev_var.set, f"Flash: {hardware['flash_name']} ({hardware['jedec_id']})")
                     elif e.get("step") in RESCUE_STEP:
                         ui(status.set, RESCUE_STEP[e["step"]].format(e.get("value") or ""))
                         if e["step"] == "ready":
@@ -938,12 +1032,21 @@ def main():
                             ui(bar.configure, value=100)
                     elif "end" in e:
                         end = e
+            while True:
+                ev, pos = R.read_progress(prog, pos)
+                handle_events(ev)
                 if not t.is_alive():
                     ev, pos = R.read_progress(prog, pos)
-                    end = next((e for e in ev if "end" in e), end)
+                    handle_events(ev)
                     break
                 time.sleep(0.2)
-            if end and end["end"] == "ok":
+            if end and end["end"] == "ok" and inspect:
+                msg = (hardware_text(end["hardware"]) + "\n\nBackup verified: " + end["backup"]
+                       + ".\nThe .json beside it contains the chip details and backup hash. "
+                       "No flash written. Power-cycle the device before using it again.")
+                ui(status.set, "Hardware identified and backup verified. No flash written; power-cycle the device.")
+                ui(messagebox.showinfo, "FM-1 Switch – Hardware / backup", msg)
+            elif end and end["end"] == "ok":
                 ui(status.set, "Flash verified. Waiting up to 40 seconds for the firmware to answer over MIDI…")
                 try:
                     identity = confirm_rescue_boot(backend, end.get("product"), port=port)
@@ -959,7 +1062,10 @@ def main():
                 ui(open_guide, "rescue_failed")
             elif end:
                 ui(status.set, f"Rescue: {end.get('error')}")
-                ui(messagebox.showerror, "FM-1 Switch – Rescue", end.get("error") or "failed")
+                msg = end.get("error") or "failed"
+                if hardware:
+                    msg += "\n\n" + hardware_text(hardware) + "\nHardware report: " + hardware["report"]
+                ui(messagebox.showerror, "FM-1 Switch – Hardware / recovery", msg)
             else:
                 ui(status.set, "Rescue did not run (the password or administrator was not given).")
             ui(end_rescue)
@@ -1097,6 +1203,10 @@ def main():
         if backend is None:
             messagebox.showerror("FM-1 Switch", NO_MIDI.format(midi_err))
             return
+        warn = flash_warning(pkg, last_hardware(rescue_dir()))
+        if warn and not messagebox.askyesno("FM-1 Switch – flash compatibility", warn, icon="warning",
+                                            default="no"):
+            return
         if not messagebox.askyesno("FM-1 Switch", f"Install {pkg.path.name} ({pkg.product})?\n\n"
                                                   "Do not unplug the FM-1 while it writes."):
             return
@@ -1117,7 +1227,7 @@ def main():
                 install(backend, pkg, step, port=port)
             except I.InstallError as e:
                 ui(status.set, f"Error: {e}")
-                ui(messagebox.showerror, "FM-1 Switch", str(e))
+                ui(messagebox.showerror, "FM-1 Switch", install_error_text(e))
             except Exception as e:
                 ui(status.set, f"Error: {e}")
             ui(busy, False)
@@ -1134,8 +1244,10 @@ def main():
     rb = ttk.Button(row, text="Rescue…", command=lambda: do_rescue())
     buttons = [ttk.Button(card_btns, text="Check / unbrick…", command=open_guide),
                ttk.Button(row, text="Add folder…", command=add_folder),
-               ttk.Button(row, text="Refresh", command=refresh), ib, rb]
+               ttk.Button(row, text="Refresh", command=refresh), ib, rb,
+               ttk.Button(card_btns, text="Hardware / backup…", command=do_inspect)]
     buttons[0].pack()
+    buttons[5].pack(pady=(px(4), 0))
     buttons[1].pack(side="left", padx=(0, px(8)))
     buttons[2].pack(side="left")
     ib.pack(side="right")
