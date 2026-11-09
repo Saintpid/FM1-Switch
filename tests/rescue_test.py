@@ -261,6 +261,17 @@ def flashes():
     return bytes(image), bytes(now)
 
 
+def with_flash_ids(image, ids, key=0x980F):
+    """the image with these JEDEC IDs as 32-bit constants in its app, as Felucca's exact-ID gate
+    compiles them (encrypted again with the chip key, the app head untouched)"""
+    plain = bytearray(R.app_area(image, key))
+    for i, fid in enumerate(ids):
+        plain[0x9000 + 16 * i:0x9004 + 16 * i] = fid.to_bytes(4, "little")
+    out = bytearray(image)
+    out[R.WRITE_MIN:R.APP_END] = R.app_area(bytes(R.WRITE_MIN) + bytes(plain), key)
+    return bytes(out)
+
+
 tmp = tempfile.mkdtemp(prefix="fm1-rescue-")
 
 # ---- the struct, as Windows lays it out
@@ -623,6 +634,56 @@ for extra in (["--write"], ["--ask"], ["--allow-ucun-write"], ["firmware.fwsc"])
             ok(False, f"inspect rejects {extra}")
         except SystemExit as e:
             ok(e.code == 2 and not opened.called, f"inspect rejects {extra} before device access")
+
+# ---- does the chosen firmware support the measured flash? (the constants of its exact-ID gate)
+image, now = flashes()
+puya = with_flash_ids(image, [0x856014])
+both = with_flash_ids(image, [0x856014, 0xB36014])
+ok(R.app_key_ok(puya, 0x980F) and R.app_key_ok(both, 0x980F), "flash IDs placed: the app head still decrypts")
+ok(R.flash_support(puya, 0xB36014, "felucca")[0] == "unsupported"
+   and R.flash_support(puya, 0x856014, "felucca")[0] == "supported",
+   "Puya-only firmware: UCUN unsupported, Puya supported")
+ok(R.flash_support(both, 0xB36014, "felucca")[0] == "supported", "firmware with both IDs: UCUN supported")
+ok(R.flash_support(image, 0xB36014, "felucca")[0] == "unknown", "no ID constant at all: unknown, not unsupported")
+ok(R.flash_support(puya, 0xB36014, "other")[0] == "unknown", "non-Felucca firmware with only 856014: unknown")
+ok(R.flash_support(image, 0xB36014, "v15")[0] == "supported", "M-VAVE's V15: UCUN supported (upstream reports)")
+ok(R.flash_support(puya, 0xB36014, "felucca", key=0x1234)[0] == "unknown",
+   "the app is read with the chip key: another key finds no IDs")
+
+if True:
+    dev = FakeUboot(now, fid=0xB36014)
+    steps = []
+    try:
+        R.rescue(R.Uboot(dev), puya, LOADER, True, tmp, allow_ucun=True, kind="felucca",
+                 say=lambda *a, **k: None, step=lambda k, v=None: steps.append((k, v)))
+        ok(False, "UCUN unit + Puya-only firmware: blocked before any flash read")
+    except R.Fail as e:
+        ok("does not support" in str(e) and not dev.erased and not dev.writes
+           and not [k for k, _ in steps if k in ("backup", "backup_read")]
+           and ("compat", {"support": "unsupported", "reason": steps[-1][1]["reason"]}) == steps[-1],
+           "UCUN unit + Puya-only firmware: blocked before any flash read")
+dev = FakeUboot(now, fid=0xB36014)
+steps = []
+ok(R.rescue(R.Uboot(dev), both, LOADER, True, tmp, allow_ucun=True, kind="felucca", say=lambda *a, **k: None,
+            step=lambda k, v=None: steps.append((k, v))) and bytes(dev.flash) == both + now[R.APP_END:]
+   and ("compat", "supported") in [(k, v and v.get("support")) for k, v in steps if k == "compat"],
+   "UCUN unit + firmware with UCUN support: rescued")
+for b in [v for k, v in steps if k == "backup"]:
+    os.remove(b)
+    os.remove(b + ".sha256")
+dev = FakeUboot(now)
+steps = []
+ok(R.rescue(R.Uboot(dev), puya, LOADER, True, tmp, kind="felucca", say=lambda *a, **k: None,
+            step=lambda k, v=None: steps.append((k, v))) and bytes(dev.flash) == puya + now[R.APP_END:],
+   "Puya unit + Puya-only firmware: rescued as before")
+for b in [v for k, v in steps if k == "backup"]:
+    os.remove(b)
+    os.remove(b + ".sha256")
+said = []
+dev = FakeUboot(now, fid=0xB36014)
+ok(R.rescue(R.Uboot(dev), image, LOADER, False, tmp, allow_ucun=True, kind="other", say=said.append) is False
+   and any("not known" in str(t) for t in said),
+   "UCUN unit + firmware without IDs: warned before the backup")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

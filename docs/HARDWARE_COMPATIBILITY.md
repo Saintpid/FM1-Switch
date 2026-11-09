@@ -92,6 +92,30 @@ The Linux request in the screenshots is a separate packaging/acceptance task.
 The existing rescue code has a Mac/Linux USB path, but that alone does not
 establish a supported Linux desktop release.
 
+## Implemented in 1.4.1: firmware support read from the package
+
+The app area `[0x4000, 0x93000)` is decrypted as the chip reads it (each 32-byte block ENC'd with
+key `980F ^ (offset >> 2)`). Felucca's gate (`main_fm1.c`: `fl_jedec_ram() == 0x856014u`) compiles
+each accepted ID as a little-endian 32-bit literal. Measured on the local packages, 2026-11-09:
+
+| Package | Product | 856014 | B36014 |
+| --- | --- | --- | --- |
+| Wild 0.3.29 | FM-1_863 | yes | no |
+| Wild 0.3.32 / 0.3.34 / 0.3.35 | FM-1_866 / 868 / 869 | yes | yes |
+| NB303 0.1.1 / 0.2.2 / 0.2.4 | FM-1_901 / 904 / 906 | yes | no |
+| n001se 1.7.1 (and diode) | FM-1_825 / 826 | yes | no |
+| M-VAVE FM-1.fwsc | FM-1_016 (not Felucca) | yes | no |
+| M-VAVE V15 | FM-1_015 | no | no |
+
+This matches the published thresholds (Wild from FM-1_864, NB303 from FM-1_908). `flash_support`
+returns supported (the measured ID is present, or V15 by its SHA-256 per the upstream reports that
+V15 saves on UCUN), unsupported (a Felucca package carrying another FM-1 ID but not this one) or
+unknown (no constant found, or not Felucca: a gate need not be a plain literal). Rescue refuses
+unsupported firmware right after identification and before any flash read; unknown firmware on
+UCUN gets a warning and stays behind the UCUN opt-in. The USB-MIDI install warns with default No,
+because the running firmware does not report its flash. A literal proves the gate accepts the
+part, not that saves persist; that remains the firmware author's hardware acceptance.
+
 ## Implemented in 1.4.0
 
 Hardware / backup explicitly starts the existing checked RAM loader, names the

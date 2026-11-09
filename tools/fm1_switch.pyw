@@ -22,6 +22,7 @@ or root: the program starts itself again with --rescue for that).
   tools/export_switch_mac.cmd            to the Mac, where Build_FM1Switch_Mac.command makes FM1-Switch.app
                                          and its DMG (tools/build_switch_mac.sh)
 """
+import json
 import os
 import re
 import shlex
@@ -167,6 +168,56 @@ def install(backend, pkg, step, port=None):
     if not dev:
         raise I.not_found(up)
     return up.install(dev, image, product, step)
+
+
+def flash_support(pkg, fid=R.UCUN_FLASH):
+    """("supported" | "unsupported" | "unknown", reason) of an FM-1 package for a flash part (cached)"""
+    cache = pkg.__dict__.setdefault("_flash", {})
+    if fid not in cache:
+        try:
+            image = R.package_flash_image(pkg.path.read_bytes())[:R.APP_END]
+            cache[fid] = R.flash_support(image, fid, pkg.kind)
+        except (OSError, R.Fail) as e:
+            cache[fid] = ("unknown", f"the package could not be read ({e})")
+    return cache[fid]
+
+
+def last_hardware(d):
+    """the newest Hardware / backup identification saved in folder d: (info, when) or None"""
+    best = None
+    try:
+        files = list(Path(d).glob("fm1-hardware-*.json"))
+    except OSError:
+        return None
+    for f in files:
+        try:
+            info = json.loads(f.read_text(encoding="utf-8"))["hardware"]
+            when = f.stat().st_mtime
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(info, dict) and (best is None or when > best[1]):
+            best = (info, when)
+    return best
+
+
+def flash_warning(pkg, hardware=None):
+    """Before a USB-MIDI install: the running firmware does not tell its flash part, so a package
+    whose exact-ID gate refuses UCUN UC25HQ80 gets a warning (None when nothing is known against it)"""
+    if pkg.model != "FM-1" or pkg.kind not in ("felucca", "v15"):
+        return None
+    support, why = flash_support(pkg)
+    if support != "unsupported":
+        return None
+    text = (f"{pkg.path.name} ({pkg.product}) does not support the UCUN UC25HQ80 flash (B36014): {why}.\n\n"
+            "FM-1s sold since autumn 2026 have this flash. On such a unit this firmware loses its saves "
+            "at power-off and the update may stop. Wild from FM-1_864 and NB303 from FM-1_908 support it.")
+    if hardware:
+        info, when = hardware
+        text += ("\n\nThe last FM-1 identified here (Hardware / backup, "
+                 f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}) has "
+                 f"{info.get('flash_name', '?')} ({info.get('jedec_id', '?')}).")
+    return text + ("\n\nThe FM-1 does not report its flash over MIDI. Install anyway only if this FM-1 "
+                   "has the Puya P25Q80H flash (856014).")
 
 
 STEP_TEXT = {"start": "Starting the update on {}", "check": "Checking the package ({} reads)",
@@ -1151,6 +1202,10 @@ def main():
         pkg = state["pkgs"][i]
         if backend is None:
             messagebox.showerror("FM-1 Switch", NO_MIDI.format(midi_err))
+            return
+        warn = flash_warning(pkg, last_hardware(rescue_dir()))
+        if warn and not messagebox.askyesno("FM-1 Switch – flash compatibility", warn, icon="warning",
+                                            default="no"):
             return
         if not messagebox.askyesno("FM-1 Switch", f"Install {pkg.path.name} ({pkg.product})?\n\n"
                                                   "Do not unplug the FM-1 while it writes."):

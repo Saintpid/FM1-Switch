@@ -19,6 +19,9 @@
 - B36014 (UCUN) writes are experimental and need explicit opt-in, over direct USB only. Unknown
   chips and keyboard/calibration matches are refused. Hardware / backup is an explicit RAM-loader
   session, never a hidden MIDI probe; it must not erase/program flash. Do not weaken these gates.
+- Rescue refuses firmware whose exact-ID gate (`flash_support`: the flash ID constants in its
+  decrypted app) excludes the measured flash, before reading or writing. The USB-MIDI install can
+  only warn: the running firmware does not report its flash. Keep both.
 - The FM-1-transporter path (`--via transporter`) is experimental until tried on hardware: say so
   wherever it shows.
 - Tests: `tests/run_tests.sh` (simulated FM-1). Add a check for anything new and make sure it can fail.

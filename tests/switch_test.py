@@ -263,5 +263,45 @@ renamed.boot("FM-1_015", "FM-1")
 ok(S.confirm_rescue_boot(renamed, "FM-1_015", port="SLOOP", secs=0) == "FM-1_015",
    "recovery: restored stock port is found after a renamed input")
 
+# ---- before a USB-MIDI install: a package that refuses UCUN flash is warned about
+import json as _json  # noqa: E402
+import random as _random  # noqa: E402
+import struct as _struct  # noqa: E402
+R = S.R
+img = bytearray(_random.Random(5).randrange(256) for _ in range(R.APP_END))
+head = bytearray(_random.Random(3).randrange(256) for _ in range(32))
+_struct.pack_into("<H", head, 0, R.crc16(bytes(head[2:32])))
+R.enc(head, 0x980F)
+img[R.WRITE_MIN:R.WRITE_MIN + 32] = head
+
+
+def ids_image(ids):
+    plain = bytearray(R.app_area(bytes(img)))
+    for i, fid in enumerate(ids):
+        plain[0x9000 + 16 * i:0x9004 + 16 * i] = fid.to_bytes(4, "little")
+    out = bytearray(img)
+    out[R.WRITE_MIN:R.APP_END] = R.app_area(bytes(R.WRITE_MIN) + bytes(plain))
+    return bytes(out)
+
+
+hw = Path(tempfile.mkdtemp(prefix="fm1-hw-"))
+pk = S.Package(wild, "FM-1_863")
+with patch.object(R, "package_flash_image", return_value=ids_image([0x856014])):
+    warn = S.flash_warning(pk)
+    pk2 = S.Package(wild, "FM-1_863")
+    (hw / "fm1-hardware-a.json").write_text(_json.dumps({"hardware": {"flash_name": "UCUN UC25HQ80",
+                                                                      "jedec_id": "B36014"}}))
+    warn2 = S.flash_warning(pk2, S.last_hardware(hw))
+ok(warn and "B36014" in warn and "864" in warn, "install: Puya-only firmware warned about UCUN flash")
+ok(warn2 and "UCUN UC25HQ80 (B36014)" in warn2.split("identified here")[1], "install: the last identified flash is named")
+with patch.object(R, "package_flash_image", return_value=ids_image([0x856014, 0xB36014])):
+    ok(S.flash_warning(S.Package(wild, "FM-1_869")) is None, "install: firmware with UCUN support not warned")
+with patch.object(R, "package_flash_image", return_value=bytes(img)):
+    ok(S.flash_warning(S.Package(wild, "FM-1_870")) is None, "install: unknown support not blocked")
+(hw / "broken.json").write_text("{")
+(hw / "fm1-hardware-b.json").write_text("[]")
+ok(S.last_hardware(hw)[0]["jedec_id"] == "B36014" and S.last_hardware(hw / "missing") is None,
+   "install: hardware reports read safely")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

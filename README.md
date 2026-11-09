@@ -26,6 +26,17 @@ Ready-made installers are distributed through [Noisebud on Patreon](https://www.
 GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
 uploading installers or application binaries.
 
+### Firmware and flash compatibility in 1.4.1
+
+Before flashing, FM-1 Switch reads which flash IDs the chosen `.fwsc` accepts: Felucca-based
+firmware (Wild, NB303, n001se ...) keeps them as constants in its encrypted app area. **Rescue…**
+measures the flash and refuses a firmware that does not support it before reading or writing
+anything. **Install** over USB-MIDI cannot measure the flash, so it warns before installing a
+firmware without UCUN UC25HQ80 (`B36014`) support and names the flash of the last FM-1 identified
+with Hardware / backup. On the published packages, Wild from FM-1_864 and NB303 from FM-1_908
+support UCUN. This is read from the firmware; persistent saves on a UCUN unit are still the
+firmware author's acceptance.
+
 ### Hardware identification and backup in 1.4.0
 
 **Hardware / backup…** reads the chip key, flash type and JEDEC ID when the device already reaches

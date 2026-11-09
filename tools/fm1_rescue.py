@@ -597,7 +597,7 @@ def give_owner(path, owner):
             pass
 
 
-def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, image=None):
+def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, image=None, kind=None):
     """Explicit UBOOT operation: RAM loader, identification, two reads, saved-file verification.
     No flash erase/program or run-app command. Unknown chips get an identification report only."""
     step = step or (lambda *a: None)
@@ -624,6 +624,16 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
     if image is not None and not app_key_ok(image, key):
         raise Fail("this firmware is not for this chip (its app area does not decrypt with key "
                    f"{key:04X}); nothing written")
+    if image is not None:
+        support, why = flash_support(image, fid, kind, key)
+        info["firmware_compatibility"] = support
+        step("compat", {"support": support, "reason": why})
+        if support == "unsupported":
+            raise Fail(f"this firmware does not support this FM-1's flash, {info['flash_name']} ({fid:06X}): "
+                       f"{why}. Choose a version that supports it (Wild from FM-1_864, NB303 from "
+                       "FM-1_908, or M-VAVE's V15); nothing read or written")
+        if support == "unknown" and fid != 0x856014:
+            say(f"  warning: {why}; whether it keeps its saves on this flash is not known")
     say("  reading the whole flash ...")
     t0 = time.time()
     step("backup_read", 1)
@@ -657,11 +667,11 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
 
 
 def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
-           strict_head=True, allow_ucun=False):
+           strict_head=True, allow_ucun=False, kind=None):
     """Back up before writing only application sectors. UCUN writes are experimental and opt-in.
     V15 requires the exact protected head; other firmware keeps the device's own head."""
     step = step or (lambda *a: None)
-    now, info, _ = inspect_backup(dev, loader, backup_dir, say, step, owner, image)
+    now, info, _ = inspect_backup(dev, loader, backup_dir, say, step, owner, image, kind)
     if info["experimental"] and (write or confirm is not None):
         if isinstance(dev, Transporter):
             raise Fail("UCUN recovery through the adapter is not supported; use direct USB. "
@@ -817,6 +827,43 @@ def app_key_ok(image, key):
         return False
     enc(head, key ^ 0)                                       # SFC: ENC with key ^ (offset >> 2), offset 0
     return crc16(bytes(head[2:32])) == struct.unpack_from("<H", head, 0)[0]
+
+
+def app_area(image, key=0x980F):
+    """the package's app area [WRITE_MIN, APP_END) decrypted as the chip's SFC reads it: each 32-byte
+    block ENC'd with key ^ (its offset >> 2)"""
+    out = bytearray(image[WRITE_MIN:APP_END])
+    for b in range(0, len(out), 32):
+        blk = out[b:b + 32]
+        enc(blk, key ^ (b >> 2))
+        out[b:b + 32] = blk
+    return bytes(out)
+
+
+# Felucca-based firmware (Wild, NB303, n001se ...) compares the measured JEDEC ID with constants in its
+# app (main_fm1.c: fl_jedec_ram() == 0x856014u): firmware without the UCUN constant keeps its sequences
+# in RAM only on a UCUN unit and its update loader may refuse it (Melodee #110, SLOOP #238). Measured on
+# the published packages: Wild from FM-1_864, NB303 from FM-1_908 carry B36014 as well.
+STOCK_FLASH_SUPPORT = {0x856014: "supported", 0xB36014: "supported"}   # V15: upstream reports save on UCUN
+
+
+def flash_support(image, fid, kind=None, key=0x980F):
+    """Can this firmware use flash part fid? -> ("supported" | "unsupported" | "unknown", reason).
+    supported: M-VAVE's V15, or the app carries fid's 32-bit constant. unsupported: a Felucca-based
+    app that carries another FM-1 part's constant but not fid's (its exact-ID gate refuses this part).
+    unknown: anything else (a gate can be coded without a plain constant)."""
+    if kind == "v15":
+        return STOCK_FLASH_SUPPORT.get(fid, "unknown"), "M-VAVE's V15"
+    app = app_area(image, key)
+    has = {f: f.to_bytes(4, "little") in app for f in FM1_FLASH}
+    name = FM1_FLASH.get(fid, f"{fid:06X}")
+    if has.get(fid):
+        return "supported", f"the firmware accepts {name} ({fid:06X})"
+    others = [f"{f:06X}" for f, h in has.items() if h and f != fid]
+    if others and kind in (None, "felucca"):
+        return "unsupported", (f"the firmware accepts only {', '.join(others)}, not {name} ({fid:06X}): "
+                               "on this flash it does not keep its saves and its update may be refused")
+    return "unknown", f"no flash ID found in the firmware for {name} ({fid:06X})"
 
 
 def product_of(raw):
@@ -1092,7 +1139,7 @@ def main(argv=None):
                 else:
                     rescue(dev, image, loader, args.write, backup_dir, say=say,
                            confirm=ask if args.ask else None, step=pf.step if pf else None, owner=owner,
-                           strict_head=kind == "v15", allow_ucun=args.allow_ucun_write)
+                           strict_head=kind == "v15", allow_ucun=args.allow_ucun_write, kind=kind)
                 if pf:
                     pf.put(end="ok", product=product, operation="inspect" if args.inspect else "rescue", **details)
                 return 0

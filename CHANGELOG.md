@@ -2,6 +2,19 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.1
+
+- **Firmware checked against the flash before flashing.** The app area of the chosen `.fwsc` is
+  decrypted with the chip key and its exact-ID gate read: Felucca-based firmware carries each JEDEC
+  ID it accepts as a 32-bit constant. On the published packages Wild from FM-1_864 and NB303 from
+  FM-1_908 carry B36014; older Wild, older NB303 and n001se 1.7.1 (FM-1_825/826) carry only 856014.
+- **Rescue blocks** firmware that does not support the measured flash right after identification,
+  before any flash read or write, even with the UCUN opt-in. M-VAVE's V15 counts as supported
+  (upstream reports); firmware without any ID constant is "unknown" and gets a warning.
+- **USB-MIDI install warns** (default No) before installing a package that refuses UCUN flash, and
+  names the flash of the last FM-1 identified with Hardware / backup. A running firmware does not
+  report its flash over MIDI, so this is a warning, not a measurement.
+
 ## 1.4.0
 
 - **Hardware / backup…** identifies the measured flash in an explicit UBOOT session and saves two

@@ -1,5 +1,14 @@
 # FM-1 Switch project memory
 
+## 2026-11-09 — 1.4.1 firmware flash-support check
+
+Built on the 1.4.0 branch with main (1.3.3) merged; 1.4.0's UCUN opt-in kept over 1.3.3's plain
+accept. `fm1_rescue.flash_support` decrypts the package app area with the chip key and looks for
+the exact-ID gate's 32-bit constants. Rescue blocks unsupported firmware before reading/writing;
+the GUI install warns (default No) and names the last Hardware / backup flash. Local packages:
+Wild >= FM-1_866 and NB303 none (<= 906) carry B36014; n001se 1.7.1 (825/826) does not. Tests are
+simulations; no hardware was probed or flashed.
+
 ## 2026-11-05 — 1.4.0 hardware identification and experimental UCUN recovery
 
 Implemented Hardware / backup (CLI --inspect), an explicit UBOOT RAM-loader
