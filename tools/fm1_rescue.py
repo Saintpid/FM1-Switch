@@ -58,6 +58,9 @@ UCUN_FLASH = 0xB36014
 # M-VAVE's SMK-37 (Pro, Elite, MKE-P37) has the FM-1's chip, key and UBOOT, but another flash map, its
 # factory calibration at 0xC1000 (marker "trimdat" at 0xC1224) and, on the unit tried, flash EB6014
 KEYBOARD_FLASH = 0xEB6014
+# the FM-1's parts: Puya P25Q80H on the first units, UCUN UC25HQ80 on those sold since autumn 2026
+# (1 MiB, the same commands; Felucca 7435517, fm1-base #35). An SMK-37 on either is still told by its calibration.
+FLASH_IDS = tuple(FM1_FLASH)
 TRIM_MARK, TRIM_AT = b"trimdat\0", 0xC1224
 KEYBOARD = ("this is an M-VAVE SMK-37 keyboard (or an MKE-P37), not an FM-1: Rescue is for the FM-1 "
             "only, and an FM-1 firmware must never go on the keyboard; nothing written")

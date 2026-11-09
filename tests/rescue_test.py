@@ -432,6 +432,30 @@ except R.Fail as e:
         os.remove(b)
         os.remove(b + ".sha256")
 
+# ---- the newer FM-1s' flash (UC25HQ80, B36014): rescued as the first ones; an SMK-37 on it still not
+image, now = flashes()
+dev = FakeUboot(now, fid=0xB36014)
+steps = []
+ok(R.rescue(R.Uboot(dev), image, LOADER, True, tmp, allow_ucun=True, say=lambda *a, **k: None,
+            step=lambda k, v=None: steps.append((k, v))) and bytes(dev.flash) == image + now[R.APP_END:],
+   "the newer FM-1s' flash (B36014): rescued with opt-in, the device data kept")
+for b in [v for k, v in steps if k == "backup"]:
+    os.remove(b)
+    os.remove(b + ".sha256")
+smk = bytearray(now)
+smk[R.TRIM_AT:R.TRIM_AT + 8] = R.TRIM_MARK
+dev = FakeUboot(smk, fid=0xB36014)
+steps = []
+try:
+    R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None, strict_head=False,
+             step=lambda k, v=None: steps.append((k, v)))
+    ok(False, "an SMK-37 on the newer flash part (its calibration): refused")
+except R.Fail as e:
+    ok("SMK-37" in str(e) and not dev.erased and not dev.writes, "an SMK-37 on the newer flash part (its calibration): refused")
+for b in [v for k, v in steps if k == "backup"]:
+    os.remove(b)
+    os.remove(b + ".sha256")
+
 # ---- any FM-1 firmware: its app area, the FM-1's own head kept; refused for another chip key
 image, now = flashes()
 other = bytearray(image)
