@@ -2,6 +2,16 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.3
+
+- Experimental BACKUP entry from a running stock FM-1 V15 over USB-MIDI. Identify a unique
+  target, prepare the loader and obtain system access first; recheck identity and send the
+  ROM-entry key once only after the recovery helper reports ready. Stop prevents key delivery.
+- Refuse other running firmware, update loaders, keyboards, ambiguous ports and unrelated output
+  pairings. Existing UBOOT backup still works without MIDI; no flash write gates changed.
+- Real-device direct USB transition and installed Mac acceptance remain pending. Save changes
+  before entering recovery and power-cycle after backup. Do not treat this as risk-free.
+
 ## 1.4.2
 
 - Highlight BACKUP in green, Install in blue and Rescue in amber without moving the controls.

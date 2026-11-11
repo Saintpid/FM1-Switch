@@ -303,5 +303,75 @@ with patch.object(R, "package_flash_image", return_value=bytes(img)):
 ok(S.last_hardware(hw)[0]["jedec_id"] == "B36014" and S.last_hardware(hw / "missing") is None,
    "install: hardware reports read safely")
 
+# Backup mode entry is separate from installation; all links below are simulated.
+v15 = T.FakeFM1(b"", identity="FM-1_015")
+session = S.prepare_backup_midi(v15)
+ok(v15.sent == [I.HS_QUERY], "backup: identification alone sends no recovery key")
+ok(not session.enter(lambda: True) and S.UBOOT_KEY not in v15.sent,
+   "backup: cancel before helper readiness sends no key")
+ok(session.enter() and v15.sent[-1] == bytes.fromhex("F0 22 24 35 7D F7"),
+   "backup: V15 gets the exact ROM key after re-identification")
+ok(not session.enter() and v15.sent.count(S.UBOOT_KEY) == 1 and I.UPGRADE not in v15.sent,
+   "backup: key sent once, never the firmware upgrade command")
+session.close()
+ok(all(l.closed for l in v15.links), "backup: MIDI ports released")
+for identity in ("FM-1_900", "FM-1_016", "ota-FM-1_015", "SMK-37 Pro_015"):
+    dev = T.FakeFM1(b"", identity=identity)
+    try:
+        S.prepare_backup_midi(dev)
+        refused = False
+    except RuntimeError:
+        refused = True
+    ok(refused and S.UBOOT_KEY not in dev.sent and all(l.closed for l in dev.links),
+       f"backup: {identity} refused without recovery key")
+dev = T.FakeFM1(b"", identity="FM-1_015")
+session = S.prepare_backup_midi(dev)
+dev.boot("FM-1_900", "FM-1")
+try:
+    session.enter()
+    refused = False
+except RuntimeError:
+    refused = True
+finally:
+    session.close()
+ok(refused and S.UBOOT_KEY not in dev.sent, "backup: identity lost during approval refuses key")
+dev = T.FakeFM1(b"", identity="FM-1_015")
+session = S.prepare_backup_midi(dev)
+with patch.object(session.link, "send", side_effect=lambda p: False if p == S.UBOOT_KEY else T.FakeLink.send(session.link, p)):
+    try:
+        session.enter()
+        refused = False
+    except RuntimeError:
+        refused = True
+ok(refused and not session.enter(), "backup: failed delivery reported and never retried")
+session.close()
+dev = T.FakeFM1(b"", name="Unrelated MIDI")
+ok(S.prepare_backup_midi(dev) is None and not dev.sent, "backup: unrelated MIDI never probed")
+with patch.object(dev, "input_names", return_value=["FM-1 A", "FM-1 B"]):
+    try:
+        S.prepare_backup_midi(dev)
+        refused = False
+    except RuntimeError:
+        refused = True
+ok(refused and not dev.sent, "backup: multiple automatic targets refused before opening")
+dev = T.FakeFM1(b"", name="Renamed target")
+session = S.prepare_backup_midi(dev, port="Renamed target")
+ok(session.identity == "FM-1_015", "backup: exact explicit renamed port supported")
+session.close()
+for port in ("Renamed", "Missing"):
+    try:
+        S.prepare_backup_midi(dev, port=port)
+        refused = False
+    except RuntimeError:
+        refused = True
+    ok(refused, "backup: explicit port never falls back or matches a substring")
+with patch.object(dev, "output_names", return_value=["Unrelated output"]):
+    try:
+        S.prepare_backup_midi(dev, port="Renamed target")
+        refused = False
+    except RuntimeError:
+        refused = True
+ok(refused and S.UBOOT_KEY not in dev.sent, "backup: unrelated sole output is not a pairing fallback")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

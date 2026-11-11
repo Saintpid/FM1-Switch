@@ -293,6 +293,70 @@ def open_midi(make=None):
         return None, str(e) or type(e).__name__
 
 
+UBOOT_KEY = bytes.fromhex("F0 22 24 35 7D F7")
+
+
+class BackupMidiSession:
+    """An identified, open target; the key is sent only after helper readiness.
+
+    Stock V15 only: FM-1-transporter/src/pio_host.c documents this ROM-entry key.
+    A MIDI identity is not cryptographic firmware attestation. Real-device acceptance
+    of the direct USB path remains required. No upgrade or flash packets are sent.
+    """
+    def __init__(self, link, identity):
+        self.link, self.identity, self.sent = link, identity, False
+
+    def enter(self, stopped=lambda: False):
+        if self.sent or stopped():
+            return False
+        ident = I.handshake(self.link, 1)
+        if not ident or ident.text != self.identity:
+            raise RuntimeError("FM-1 identity changed or disappeared; recovery key not sent.")
+        if stopped():
+            return False
+        self.sent = True  # never retry a mode-changing command
+        if not self.link.send(UBOOT_KEY):
+            raise RuntimeError("Recovery key delivery failed; power-cycle the FM-1 before retrying.")
+        return True
+
+    def close(self):
+        self.link.close()
+
+
+def prepare_backup_midi(backend, port=None):
+    """Fail closed on ambiguous ports/unknown firmware; no key during preparation.
+
+    No matching MIDI port means wait for an already-recovering unit, never a
+    broadcast. Explicit selection must match a complete input name.
+    """
+    if backend is None:
+        return None
+    names = backend.input_names()
+    candidates = [n for n in names if n == port] if port else [n for n in names if I.PORT_RE.search(n)]
+    if port and not candidates:
+        raise RuntimeError("Selected MIDI port is missing. Refresh the port list and select the FM-1 again.")
+    if not candidates:
+        return None
+    if len(candidates) != 1:
+        raise RuntimeError("Multiple MIDI targets found. Select the FM-1 MIDI port explicitly before BACKUP.")
+    name = candidates[0]
+    base = lambda n: re.sub(r"\s+\d+$", "", n)
+    outs = backend.output_names()
+    matches = [name] if name in outs else [n for n in outs if base(n) == base(name)]
+    if len(matches) != 1:
+        raise RuntimeError("Cannot pair the selected FM-1 input with a unique MIDI output; no key sent.")
+    link = backend.open(name, matches[0])
+    try:
+        ident = I.handshake(link, 2)
+        if not ident or ident.model != "FM-1" or ident.version != 15:
+            raise RuntimeError("Automatic BACKUP recovery entry currently supports stock FM-1 V15 only. "
+                               "Other firmware and update loaders are refused; no recovery key sent.")
+        return BackupMidiSession(link, ident.text)
+    except Exception:
+        link.close()
+        raise
+
+
 def row_values(p):
     """the firmware list's columns for a Package: family, file, identity, note"""
     return (p.family, p.path.stem, "V15" if p.kind == "v15" else p.product,
@@ -992,12 +1056,14 @@ def main():
         if messagebox.askokcancel("FM-1 Switch – BACKUP",
                 "Save the full 1 MiB flash: boot code, firmware and stored device/user data. "
                 "This does not erase or program flash.\n\n"
-                "Before you start: this version requires the FM-1 to already reach chip recovery "
-                "(UBOOT). It cannot switch a normally running FM-1 into UBOOT for you. "
+                "Experimental: for a running stock V15 FM-1, this asks the device to enter chip "
+                "recovery (UBOOT) over USB-MIDI after system access is ready. Save your changes first. "
+                "Other running firmware is refused. Devices already in UBOOT need no MIDI command. "
                 "OCT- and OCT+ enter a different, firmware update mode. "
                 "Do not interrupt an installation or damage firmware to force UBOOT.\n\n"
                 "1. Connect only the target FM-1 directly with a USB data cable, without a hub.\n"
-                "2. Press OK to prepare the checked RAM loader and approve system access.\n"
+                "2. Select the FM-1 MIDI port if needed. Press OK to allow recovery entry, "
+                "prepare the checked RAM loader and approve system access.\n"
                 "3. Keep it connected while two full reads are compared and the saved file is verified.\n\n"
                 f"Save folder: {rescue_dir()}\n\n"
                 "Success shows the backup path. Switch the FM-1 off and on afterwards. "
@@ -1014,10 +1080,13 @@ def main():
         state["rescue"] = prog
 
         def work():
+            midi_session = None
             try:
                 path = None if inspect else (target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip())))
                 ui(status.set, "Getting JieLi's flash loader…")
                 R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
+                if inspect and via == "usb" and R.uboot_present() is not True:
+                    midi_session = prepare_backup_midi(backend, port)
                 cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via,
                                                 inspect=inspect, allow_ucun=allow_ucun))
                 ui_wait(status.set, "Waiting for system approval. Take your time with the permission dialog. "
@@ -1025,15 +1094,19 @@ def main():
                         if via == "usb" else "Connecting to the adapter. Firmware has not been changed.")
                 wait = subprocess.Popen(cmd).wait if via != "usb" else run_elevated(cmd)
             except Exception as e:
+                if midi_session:
+                    midi_session.close()
                 ui(status.set, f"Rescue not started: {e}")
+                ui(messagebox.showerror, "FM-1 Switch – BACKUP" if inspect else "FM-1 Switch – Rescue", str(e))
                 ui(end_rescue)
                 return
             state["rescue"] = prog
             done, pos, end, hardware = {"code": None}, 0, None, None
             t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
             t.start()
+            transition_error = None
             def handle_events(ev):
-                nonlocal end, hardware
+                nonlocal end, hardware, transition_error
                 for e in ev:
                     if "say" in e:
                         ui(status.set, e["say"])
@@ -1045,6 +1118,14 @@ def main():
                         if e["step"] == "ready":
                             ui(rb.configure, text="Stop")
                             ui(rb.state, ["!disabled"])
+                            if midi_session:
+                                try:
+                                    if midi_session.enter(lambda: Path(prog + ".stop").exists()):
+                                        ui(status.set, "Recovery key sent to stock V15. Waiting for USB UBOOT; "
+                                           "keep connected. No backup verified yet.")
+                                except Exception as exc:
+                                    transition_error = str(exc)
+                                    Path(prog + ".stop").touch()
                         if e["step"] == "write":
                             ui(rb.state, ["disabled"])
                             ui(bar.configure, value=e["value"])
@@ -1060,6 +1141,10 @@ def main():
                     handle_events(ev)
                     break
                 time.sleep(0.2)
+            if midi_session:
+                midi_session.close()
+            if transition_error:
+                end = {"end": "fail", "error": transition_error}
             if end and end["end"] == "ok" and inspect:
                 msg = (hardware_text(end["hardware"]) + "\n\nBackup verified: " + end["backup"]
                        + ".\nThe .json beside it contains the chip details and backup hash. "
@@ -1077,7 +1162,7 @@ def main():
                 ui(set_tone, "ok" if confirmed else "off")
                 ui(status.set, msg)
                 ui(messagebox.showinfo, "FM-1 Switch", msg)
-            elif end and "did not appear" in (end.get("error") or "") and via == "usb":
+            elif end and "did not appear" in (end.get("error") or "") and via == "usb" and not inspect:
                 ui(status.set, "Rescue: the FM-1 did not show up in the chip's update mode.")
                 ui(open_guide, "rescue_failed")
             elif end:
@@ -1268,7 +1353,7 @@ def main():
                ttk.Button(card_btns, text="BACKUP…", style="Backup.TButton", command=do_inspect)]
     buttons[0].pack()
     buttons[5].pack(pady=(px(4), 0))
-    ttk.Label(card_btns, text="Full flash • requires UBOOT", style="Muted.TLabel").pack(pady=(px(4), 0))
+    ttk.Label(card_btns, text="Full flash • V15 / UBOOT", style="Muted.TLabel").pack(pady=(px(4), 0))
     buttons[1].pack(side="left", padx=(0, px(8)))
     buttons[2].pack(side="left")
     ib.pack(side="right")

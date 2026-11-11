@@ -1,5 +1,15 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.3 experimental backup MIDI entry
+
+User authorized building/testing the backup workflow. BACKUP prepares a unique MIDI target,
+accepts only FM-1 version 15 identity, and keeps its link until system approval/helper ready.
+Re-identifies then sends F0 22 24 35 7D F7 once (upstream FM-1-transporter/src/pio_host.c).
+Stop/identity loss/failure blocks delivery; no upgrade command, firmware patch or flash writes.
+Other firmware, loaders/keyboards and ambiguous targets are refused. Existing UBOOT bypasses
+MIDI. Direct USB transition, real backup and installed Mac acceptance remain pending; all
+verification must be simulated. MIDI identity is not cryptographic firmware attestation.
+
 ## 2026-11-11 — 1.4.2 clearer backup controls
 
 Kept button placement; BACKUP green, Install blue, Rescue amber. Backup instructions now name

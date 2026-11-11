@@ -37,15 +37,22 @@ with Hardware / backup. On the published packages, Wild from FM-1_864 and NB303 
 support UCUN. This is read from the firmware; persistent saves on a UCUN unit are still the
 firmware author's acceptance.
 
-### Hardware identification and backup in 1.4.0
+### Full-flash backup and experimental V15 entry in 1.4.3
 
-**BACKUP…** (green, in the device panel; previously Hardware / backup) reads the chip key, flash type and JEDEC ID when the device already reaches
-the chip's UBOOT mode. It starts a hash-checked program in device RAM, then saves two matching full
+**BACKUP…** (green, in the device panel; previously Hardware / backup) reads the chip key, flash type and JEDEC ID in
+the chip's UBOOT mode, with experimental automatic entry for stock V15. It starts a hash-checked program in device RAM, then saves two matching full
 flash reads and verifies the saved file. It does not erase or program flash and needs no firmware
 package. Administrator access is requested separately; the device timer starts after approval.
 Power-cycle afterwards. A working MIDI firmware does not expose its flash ID through this tool;
 do not damage or interrupt a working firmware to force UBOOT. OCT- and OCT+ enter the
-firmware update mode, not chip UBOOT. This version does not send a MIDI command to enter UBOOT.
+firmware update mode, not chip UBOOT. For a normally running **stock V15** unit, BACKUP can now send the ROM-entry MIDI key
+(`F0 22 24 35 7D F7`) after explicit confirmation and helper readiness. This direct USB path is
+**experimental, pending real-device acceptance**. Save changes first; no risk-free claim is made.
+Other running firmware and update loaders are refused. Connect only the target FM-1; select its
+MIDI input explicitly if multiple ports match. Identity must remain FM-1 V15 after system approval.
+The command is sent once only; it is never the firmware upgrade command. If entry fails, no
+backup is declared successful. Power-cycle before retrying. An existing UBOOT session needs no MIDI.
+The key is documented in [FM-1-transporter's source](https://github.com/kurogedelic/FM-1-transporter/blob/main/src/pio_host.c).
 The backup dialog shows the save folder and numbered connection, approval and verification steps.
 Install is blue and writes the selected firmware; Rescue is amber and opens the protected recovery
 workflow. The controls remain in their original positions.
