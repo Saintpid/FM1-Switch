@@ -2,6 +2,15 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.5
+
+- Refine the window with neutral surfaces, one restrained accent, outlined secondary actions,
+  improved typography/spacing and matching device-card buttons. Keep the existing action locations.
+- Fix square-looking corners caused by ttk background fill with surface-matched antialiased
+  rounded borders; retain hover, disabled and keyboard-focus states.
+- Fit status instructions to the actual available column width; show concise connection guidance
+  and route detailed troubleshooting through Check / unbrick instead of clipping a wall of text.
+
 ## 1.4.4
 
 - Keep rounded action buttons with colour, hover, disabled and keyboard-focus states.

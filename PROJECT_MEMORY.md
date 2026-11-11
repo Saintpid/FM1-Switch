@@ -1,5 +1,18 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.5 visual design correction
+
+User's actual 1.4.4 screenshot exposed square-looking corners, competing colours and clipped
+status copy despite construction tests. Do not treat image transparency or matching dimensions
+as visual acceptance. Reworked main UI with neutral light/dark surfaces, one blue accent,
+outlined secondary actions, explicit surface-matched antialiased button corners, consistent
+utility buttons, stronger typography, quieter table headings/selection and a thin progress line.
+Check and BACKUP keep equal dimensions and original positions. Status wraps to its actual grid
+column width and missing-device advice is concise, with detailed help in Check / unbrick.
+Visual QA uses .git/preview_ui.py (not shipped), mocked MIDI/USB, simulated package rows and
+computer-use screenshots; real hardware must not be probed during verification. Mac/device
+backup acceptance remains separate. Native helper launch and flash safety code unchanged.
+
 ## 2026-11-11 — 1.4.4 rounded, matching controls
 
 User requested rounded corners and equal Check / unbrick and BACKUP sizes. Custom Tk image

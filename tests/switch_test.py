@@ -140,7 +140,7 @@ ok(S.diagnose(dev, lambda: False, 0.05, poll=0.01) == ("none", None) and S.diagn
    "diagnosis: nothing (and without MIDI or USB probing)")
 texts = [S.advice("running", "FM-1_846"), S.advice("loader", "ota-FM-1_900"), S.advice("uboot"),
          S.advice("none"), S.advice("none", probe_ok=False)]
-ok("Install" in texts[1][1] and "Rescue" in texts[2][1] and "transporter" in texts[3][1]
+ok("Install" in texts[1][1] and "Rescue" in texts[2][1] and "Check / unbrick" in texts[3][1]
    and "pyusb" in texts[4][1] and "FM-1_846" in texts[0][0], "advice: what to do in each state")
 
 # ---- the unbrick guide: the FM-1 first, questions only when it says nothing, then one thing to try
