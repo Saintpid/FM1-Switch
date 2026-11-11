@@ -5,6 +5,12 @@
 User requested rounded corners and equal Check / unbrick and BACKUP sizes. Custom Tk image
 borders preserve action colours, round corners, keyboard focus and disabled/hover states in
 Sun Valley and clam themes; the two device-card buttons share width/font/padding. Positions kept.
+Validation: 1.4.4 install/switch/rescue/export simulations passed; light/dark Tk smoke confirms
+matching 213x55 device-card buttons on this Windows display. Normative release.ps1 built the
+unsigned Windows installer and verified its setup-folder copy. Builder accepted the local
+1.4.4 Mac source ZIP; ZIP/runner/flow copies to SEM were size/SHA-256 verified. Exported shared
+runtime bytes were also compared to canonical sources. No real hardware or signed Mac acceptance.
+
 The preceding 1.4.3 Windows installer built (unsigned) and Mac source ZIP passed Builder and
 verified SEM copies. Its release gate required updating package_common.py and plugin_version.py
 byte-identically from Follower. Simulated GUI confirms approval -> helper ready -> one ROM key,
