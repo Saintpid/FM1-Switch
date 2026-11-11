@@ -792,7 +792,7 @@ def main():
         radius = max(4, px(10))
         size = radius * 2 + px(8)
         stroke = max(1, px(2 if focused else 1))
-        outline = C["accent"] if focused else outline
+        outline = (C["fg"] if colour == C["accent"] else C["accent"]) if focused else outline
         def rgb(c):
             return tuple(int(c[i:i+2], 16) for i in (1, 3, 5))
         bg, edge, fill = rgb(parent), rgb(outline), rgb(colour)

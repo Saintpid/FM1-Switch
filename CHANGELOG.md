@@ -2,6 +2,10 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.6
+
+- Give the primary action buttons a contrasting keyboard-focus outline in both light and dark themes.
+
 ## 1.4.5
 
 - Refine the window with neutral surfaces, one restrained accent, outlined secondary actions,

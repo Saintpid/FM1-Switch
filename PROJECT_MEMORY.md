@@ -1,5 +1,11 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.6 final keyboard focus check
+
+The 1.4.5 visual refresh built and exported successfully. Final source review found that the
+primary button focus outline matched its fill; 1.4.6 uses a contrasting outline for keyboard
+navigation. Keep 1.4.5 historical exports unchanged. Both versions keep flash/MIDI behavior unchanged.
+
 ## 2026-11-11 — 1.4.5 visual design correction
 
 User's actual 1.4.4 screenshot exposed square-looking corners, competing colours and clipped
