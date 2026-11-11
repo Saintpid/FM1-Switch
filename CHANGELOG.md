@@ -4,6 +4,8 @@ A version is a `VERSION` change with its section below (CI checks the section is
 
 ## 1.4.3
 
+- Refresh the byte-identical Mac package helper and its plugin-version dependency from shared sources.
+
 - Experimental BACKUP entry from a running stock FM-1 V15 over USB-MIDI. Identify a unique
   target, prepare the loader and obtain system access first; recheck identity and send the
   ROM-entry key once only after the recovery helper reports ready. Stop prevents key delivery.
