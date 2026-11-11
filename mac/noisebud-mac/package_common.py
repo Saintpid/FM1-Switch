@@ -54,6 +54,10 @@ def validate_metadata(metadata, manifest):
     names = metadata['installer']
     if names['releaseVersion'] != release or not safe_leaf(names['fileStem']):
         raise ValueError('Invalid installer name/version')
+    if 'pluginVersion' in names:
+        # Older exports lack it and keep using releaseVersion (plugin_version.py).
+        import plugin_version
+        plugin_version.au_version(names['pluginVersion'])
     for key, prefix, suffix in (('windowsFileName', 'Win_-_', '.exe'), ('macFileName', 'macOS_-_', '.dmg')):
         if names[key] != prefix + names['fileStem'] + suffix or not safe_leaf(names[key]):
             raise ValueError('Inconsistent installer filenames')

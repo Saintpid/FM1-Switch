@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "imported": "2026-11-02",
+  "imported": "2026-11-11",
   "note": "Byte-identical copies. Update from upstream (never patch here) and change these hashes together; tests/export_test.py checks them, release.ps1 compares them with the canonical files.",
   "files": {
     "mac/signing/noisebud_signing.py": {
@@ -12,8 +12,8 @@
       "source": "C:/Projects/Noisebud Mac Signing/noisebud-signing.json"
     },
     "mac/noisebud-mac/package_common.py": {
-      "sha256": "ca320dba56e0697cd8ff88837ac94fa2d9e82741c7cf0892595c5a26a07fad83",
-      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py (same bytes as PER scripts/noisebud-mac)"
+      "sha256": "9987c558c2adf5f592743d25a38b92588866750a3d37d120fc17f4088a83788f",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py"
     },
     "mac/noisebud-mac/verify_native_mac.py": {
       "sha256": "8f5e99906d66e48baac1347c7091184d394079e52cba3e861a86c78e31924197",
@@ -26,6 +26,10 @@
     "mac/assets/Noisebud.icns": {
       "sha256": "e78a03c68f18360d4ff51f783b6e81b1c338140a066f55d003f65f728542a250",
       "source": "C:/Projects/Noisebud Follower/mac-packaging/assets/Noisebud.icns"
+    },
+    "mac/noisebud-mac/plugin_version.py": {
+      "sha256": "8ce78e8a1830dae23b09959628628565b633198523ee64d02d5669d2d1d96a56",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/plugin_version.py"
     }
   }
 }

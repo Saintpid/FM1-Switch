@@ -293,6 +293,70 @@ def open_midi(make=None):
         return None, str(e) or type(e).__name__
 
 
+UBOOT_KEY = bytes.fromhex("F0 22 24 35 7D F7")
+
+
+class BackupMidiSession:
+    """An identified, open target; the key is sent only after helper readiness.
+
+    Stock V15 only: FM-1-transporter/src/pio_host.c documents this ROM-entry key.
+    A MIDI identity is not cryptographic firmware attestation. Real-device acceptance
+    of the direct USB path remains required. No upgrade or flash packets are sent.
+    """
+    def __init__(self, link, identity):
+        self.link, self.identity, self.sent = link, identity, False
+
+    def enter(self, stopped=lambda: False):
+        if self.sent or stopped():
+            return False
+        ident = I.handshake(self.link, 1)
+        if not ident or ident.text != self.identity:
+            raise RuntimeError("FM-1 identity changed or disappeared; recovery key not sent.")
+        if stopped():
+            return False
+        self.sent = True  # never retry a mode-changing command
+        if not self.link.send(UBOOT_KEY):
+            raise RuntimeError("Recovery key delivery failed; power-cycle the FM-1 before retrying.")
+        return True
+
+    def close(self):
+        self.link.close()
+
+
+def prepare_backup_midi(backend, port=None):
+    """Fail closed on ambiguous ports/unknown firmware; no key during preparation.
+
+    No matching MIDI port means wait for an already-recovering unit, never a
+    broadcast. Explicit selection must match a complete input name.
+    """
+    if backend is None:
+        return None
+    names = backend.input_names()
+    candidates = [n for n in names if n == port] if port else [n for n in names if I.PORT_RE.search(n)]
+    if port and not candidates:
+        raise RuntimeError("Selected MIDI port is missing. Refresh the port list and select the FM-1 again.")
+    if not candidates:
+        return None
+    if len(candidates) != 1:
+        raise RuntimeError("Multiple MIDI targets found. Select the FM-1 MIDI port explicitly before BACKUP.")
+    name = candidates[0]
+    base = lambda n: re.sub(r"\s+\d+$", "", n)
+    outs = backend.output_names()
+    matches = [name] if name in outs else [n for n in outs if base(n) == base(name)]
+    if len(matches) != 1:
+        raise RuntimeError("Cannot pair the selected FM-1 input with a unique MIDI output; no key sent.")
+    link = backend.open(name, matches[0])
+    try:
+        ident = I.handshake(link, 2)
+        if not ident or ident.model != "FM-1" or ident.version != 15:
+            raise RuntimeError("Automatic BACKUP recovery entry currently supports stock FM-1 V15 only. "
+                               "Other firmware and update loaders are refused; no recovery key sent.")
+        return BackupMidiSession(link, ident.text)
+    except Exception:
+        link.close()
+        raise
+
+
 def row_values(p):
     """the firmware list's columns for a Package: family, file, identity, note"""
     return (p.family, p.path.stem, "V15" if p.kind == "v15" else p.product,
@@ -354,13 +418,9 @@ def advice(state, ident=None, probe_ok=True):
                 "then install Wild or NB303 as usual. (An SMK-37 keyboard in this mode: Rescue refuses "
                 "it, it is for the FM-1 only.)")
     return ("FM-1: not found",
-            "1. A USB data cable straight into the computer (no hub), the FM-1 switched on, no other "
-            "MIDI app open. 2. If it shows a picture but does not answer: hold OCT- and OCT+ for 5 "
-            "seconds, then Check FM-1 again. 3. If the screen stays dark or it restarts over and over: "
-            "press Rescue… and switch it off and on; a firmware that keeps crashing ends up in the "
-            "chip's own update mode, where it is caught."
-            + ("" if probe_ok else " (This computer cannot see that mode: pyusb is missing.)")
-            + " 4. If nothing at all shows on USB: it needs an FM-1-transporter (RP2040) adapter.")
+            "Connect the FM-1 directly with a USB data cable and switch it on. Close other MIDI apps.\n\n"
+            "Still not found? Choose Check / unbrick for step-by-step help."
+            + ("" if probe_ok else " USB recovery detection is unavailable: pyusb is missing."))
 
 
 # ----------------------------------------------------------------- guide ---
@@ -659,12 +719,12 @@ def dark_mode():
 
 
 # the colours beside the theme's own: text, quiet text, card, line, accent, and the status dot's
-PALETTE = {True: {"bg": "#1c1c1c", "fg": "#fafafa", "muted": "#a0a0a0", "card": "#2b2b2b",
-                  "line": "#3a3a3a", "accent": "#57c8ff", "ok": "#3fb950", "warn": "#e3b341",
-                  "bad": "#f85149", "off": "#6e7681"},
-           False: {"bg": "#fafafa", "fg": "#1c1c1c", "muted": "#5f5f5f", "card": "#ffffff",
-                   "line": "#e5e5e5", "accent": "#005fb8", "ok": "#1a7f37", "warn": "#9a6700",
-                   "bad": "#cf222e", "off": "#8c959f"}}
+PALETTE = {True: {"bg": "#181b21", "fg": "#ecedf2", "muted": "#a2a8b5", "card": "#22262e",
+                  "line": "#3a414e", "accent": "#8aa4ff", "ok": "#73c49a", "warn": "#e1b675",
+                  "bad": "#ed9296", "off": "#818a9b", "hover": "#2d3340"},
+           False: {"bg": "#f5f6f8", "fg": "#202635", "muted": "#667085", "card": "#ffffff",
+                   "line": "#d9dee7", "accent": "#3759d7", "ok": "#25835d", "warn": "#99672b",
+                   "bad": "#b44752", "off": "#929baa", "hover": "#edf0f6"}}
 
 
 def dark_titlebar(win, dark):
@@ -713,46 +773,135 @@ def main():
     family = "SF Pro Text" if mac else "Segoe UI Variable Text"
     if family not in tkfont.families():
         family = "Helvetica" if mac else "Segoe UI"
-    body_f = (family, 13 if mac else 10)
-    small_f = (family, 11 if mac else 9)
+    body_f = (family, 13 if mac else 11)
+    small_f = (family, 11 if mac else 10)
     head_f = (family, 15 if mac else 12, "bold")
-    title_f = (family, 22 if mac else 18, "bold")
+    title_f = (family, 24 if mac else 22, "bold")
+    button_f = (family, 13 if mac else 10, "bold")
     st = ttk.Style()
+    st.configure(".", font=body_f)
+    st.configure("TFrame", background=C["bg"])
+    st.layout("TLabel", [("Label.padding", {"sticky": "nswe", "children": [
+        ("Label.label", {"sticky": "nswe"})]})])
+    st.configure("TLabel", background=C["bg"], foreground=C["fg"], font=body_f)
+    st.configure("Card.TFrame", background=C["card"])
+    # Opaque, antialiased corners match the parent surface. Transparent corners
+    # expose ttk's rectangular widget background on some installed themes.
+    button_images = []
+    def rounded_image(colour, parent, outline, focused=False):
+        radius = max(4, px(10))
+        size = radius * 2 + px(8)
+        stroke = max(1, px(2 if focused else 1))
+        outline = (C["fg"] if colour == C["accent"] else C["accent"]) if focused else outline
+        def rgb(c):
+            return tuple(int(c[i:i+2], 16) for i in (1, 3, 5))
+        bg, edge, fill = rgb(parent), rgb(outline), rgb(colour)
+        def coverage(x, y, inset):
+            r = max(1, radius - inset)
+            count = 0
+            for ox, oy in ((.25, .25), (.75, .25), (.25, .75), (.75, .75)):
+                xx, yy = x + ox, y + oy
+                if inset <= xx < size-inset and inset <= yy < size-inset:
+                    dx = max(inset+r-xx, xx-(size-inset-r), 0)
+                    dy = max(inset+r-yy, yy-(size-inset-r), 0)
+                    count += dx*dx + dy*dy <= r*r
+            return count / 4
+        rows = []
+        for y in range(size):
+            row = []
+            for x in range(size):
+                outer, inner = coverage(x, y, 0), coverage(x, y, stroke)
+                colour_rgb = tuple(round(bg[i]*(1-outer) + edge[i]*(outer-inner) + fill[i]*inner)
+                                   for i in range(3))
+                row.append("#%02x%02x%02x" % colour_rgb)
+            rows.append("{" + " ".join(row) + "}")
+        im = tk.PhotoImage(master=root, width=size, height=size)
+        im.put(" ".join(rows))
+        button_images.append(im)
+        return im
+    for name in ("Backup", "Check", "Install", "Rescue", "Utility"):
+        primary = name in ("Backup", "Install")
+        parent = C["card"] if name in ("Backup", "Check") else C["bg"]
+        colour = C["accent"] if primary else C["card"]
+        hover = ("#a3b7ff" if dark else "#2c48bb") if primary else C["hover"]
+        foreground = ("#151d35" if dark else "#ffffff") if primary else C["fg"]
+        outline = colour if primary else C["line"]
+        style, element = name + ".TButton", name + ".rounded"
+        normal = rounded_image(colour, parent, outline)
+        disabled = rounded_image(C["hover"], parent, C["line"])
+        active = rounded_image(hover, parent, hover if primary else C["line"])
+        focus = rounded_image(colour, parent, outline, True)
+        st.element_create(element, "image", normal, ("disabled", disabled),
+                          ("pressed", active), ("focus", focus), ("active", active),
+                          border=px(10), sticky="nswe")
+        st.layout(style, [(element, {"sticky": "nswe", "children": [
+            ("Button.padding", {"sticky": "nswe", "children": [
+                ("Button.label", {"sticky": "nswe"})]})]})])
+        st.configure(style, background=parent, foreground=foreground,
+                     font=(family, small_f[1]) if name == "Utility" else button_f,
+                     anchor="center", padding=(px(12 if name == "Utility" else 16), px(4)))
+        st.map(style, foreground=[("disabled", C["muted"])])
+    panel_image = rounded_image(C["card"], C["bg"], C["line"])
+    st.element_create("Card.panel", "image", panel_image, border=px(10), sticky="nswe")
+    st.layout("Card.TFrame", [("Card.panel", {"sticky": "nswe"})])
+    st.configure("Surface.TFrame", background=C["card"])
     st.configure("Muted.TLabel", foreground=C["muted"], font=small_f)
+    st.configure("Card.Muted.TLabel", background=C["card"], foreground=C["muted"], font=small_f)
+    st.configure("Card.Head.TLabel", background=C["card"], font=head_f)
     st.configure("Head.TLabel", font=head_f)
     st.configure("Title.TLabel", font=title_f)
-    st.configure("Section.TLabel", foreground=C["muted"], font=(family, small_f[1], "bold"))
-    st.configure("Treeview", rowheight=px(30), font=body_f)
-    st.configure("Treeview.Heading", font=small_f)
-    root.geometry(f"{px(760)}x{px(560)}")
-    root.minsize(px(620), px(460))
+    st.configure("Section.TLabel", foreground=C["fg"], font=(family, small_f[1], "bold"))
+    # Override inherited Sun Valley state maps as well as default colours.
+    for label_style, surface, ink in (("TLabel", C["bg"], C["fg"]),
+                                       ("Muted.TLabel", C["bg"], C["muted"]),
+                                       ("Card.Muted.TLabel", C["card"], C["muted"]),
+                                       ("Card.Head.TLabel", C["card"], C["fg"])):
+        st.map(label_style, background=[("!disabled", surface)], foreground=[("!disabled", ink)])
+    st.configure("Treeview", rowheight=px(38), font=body_f, background=C["card"],
+                 fieldbackground=C["card"], foreground=C["fg"], borderwidth=0)
+    st.map("Treeview", background=[("selected", "#344266" if dark else "#e8edfc")],
+           foreground=[("selected", C["fg"])])
+    st.layout("Treeview.Heading", [("Treeheading.padding", {"sticky": "nswe", "children": [
+        ("Treeheading.text", {"sticky": "we"})]})])
+    st.configure("Treeview.Heading", font=(family, small_f[1], "bold"), foreground=C["muted"], padding=(px(8), px(8)))
+    for element, colour in (("Quiet.trough", C["line"]), ("Quiet.pbar", C["accent"])):
+        strip = tk.PhotoImage(master=root, width=1, height=px(3))
+        strip.put(colour, to=(0, 0, 1, px(3)))
+        button_images.append(strip)
+        st.element_create(element, "image", strip, sticky="nswe")
+    st.layout("Quiet.Horizontal.TProgressbar", [("Quiet.trough", {"sticky": "we", "children": [
+        ("Quiet.pbar", {"side": "left", "sticky": "ns"})]})])
+    st.configure("Quiet.Horizontal.TProgressbar", troughcolor=C["line"], background=C["accent"],
+                 lightcolor=C["accent"], darkcolor=C["accent"], borderwidth=0, thickness=3)
+    root.geometry(f"{px(840)}x{px(640)}")
+    root.minsize(px(720), px(560))
     dark_titlebar(root, dark)
     folders = default_folders()
     state = {"pkgs": [], "busy": False, "rescue": None}
     tone = {"value": "off"}
 
-    top = ttk.Frame(root, padding=(px(20), px(16), px(20), px(16)))
+    top = ttk.Frame(root, padding=(px(24), px(22), px(24), px(22)))
     top.pack(fill="both", expand=True)
 
     head = ttk.Frame(top)
     head.pack(fill="x")
-    ttk.Label(head, text="FM-1 Switch", style="Title.TLabel").pack(side="left")
-    ttk.Label(head, text=f"  {app_version()}", style="Muted.TLabel").pack(side="left", anchor="s", pady=(0, px(5)))
+    tk.Label(head, text="FM-1 Switch", background=C["bg"], foreground=C["fg"], font=title_f, padx=0, pady=0).pack(side="left")
+    tk.Label(head, text=f"  v{app_version()}", background=C["bg"], foreground=C["muted"], font=small_f, padx=0, pady=0).pack(side="left", anchor="s", pady=(0, px(5)))
 
-    card = ttk.Frame(top, style="Card.TFrame", padding=(px(16), px(14)))
-    card.pack(fill="x", pady=(px(14), px(16)))
+    card = ttk.Frame(top, style="Card.TFrame", padding=(px(20), px(18)))
+    card.pack(fill="x", pady=(px(22), px(22)))
     card.columnconfigure(1, weight=1)
     dot = tk.Canvas(card, width=px(14), height=px(14), highlightthickness=0, bd=0, background=C["card"])
     dot.grid(row=0, column=0, sticky="w", padx=(0, px(10)))
     dot_id = dot.create_oval(px(2), px(2), px(12), px(12), fill=C["off"], outline="")
     dev_var = tk.StringVar(value="FM-1: not read yet")
-    ttk.Label(card, textvariable=dev_var, style="Head.TLabel").grid(row=0, column=1, sticky="w")
+    tk.Label(card, textvariable=dev_var, background=C["card"], foreground=C["fg"], font=head_f, anchor="w", padx=0, pady=0).grid(row=0, column=1, sticky="w")
     status = tk.StringVar(value="Connect the FM-1 with a USB data cable, close other MIDI apps.")
-    msg = ttk.Label(card, textvariable=status, style="Muted.TLabel", justify="left", wraplength=px(520))
+    msg = tk.Label(card, textvariable=status, background=C["card"], foreground=C["muted"], font=small_f, anchor="nw", justify="left", width=1, wraplength=px(360), padx=0, pady=0)
     msg.grid(row=1, column=1, sticky="we", pady=(px(4), 0))
-    card_btns = ttk.Frame(card)
+    card_btns = ttk.Frame(card, style="Surface.TFrame")
     card_btns.grid(row=0, column=2, rowspan=2, sticky="ne", padx=(px(12), 0))
-    card.bind("<Configure>", lambda e: msg.configure(wraplength=max(px(200), e.width - px(220))))
+    msg.bind("<Configure>", lambda e: msg.configure(wraplength=max(1, e.width)))
 
     def set_tone(t):
         tone["value"] = t
@@ -760,15 +909,18 @@ def main():
 
     row = ttk.Frame(top)                        # (packed from the bottom: the list takes what is left)
     row.pack(side="bottom", fill="x", pady=(px(12), 0))
-    bar = ttk.Progressbar(top, maximum=100)
+    bar = ttk.Progressbar(top, maximum=100, style="Quiet.Horizontal.TProgressbar")
     bar.pack(side="bottom", fill="x", pady=(px(12), 0))
-    ttk.Label(top, text="FIRMWARE FILES", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
+    list_head = ttk.Frame(top)
+    list_head.pack(fill="x", pady=(0, px(10)))
+    ttk.Label(list_head, text="Firmware files", style="Section.TLabel").pack(side="left")
+    ttk.Label(list_head, text="Choose a file, then Install", style="Muted.TLabel").pack(side="right")
     lf = ttk.Frame(top)
     lf.pack(fill="both", expand=True)
     cols = ("fam", "name", "id", "note")
     lst = ttk.Treeview(lf, columns=cols, show="headings", selectmode="browse", height=6)
     for c, t, w, s in (("fam", "Family", 90, False), ("name", "File", 280, True), ("id", "Identity", 120, False),
-                       ("note", "", 110, False)):
+                       ("note", "Status", 110, False)):
         lst.heading(c, text=t, anchor="w")
         lst.column(c, width=px(w), anchor="w", stretch=s)
     lst.tag_configure("other", foreground=C["muted"])
@@ -974,14 +1126,21 @@ def main():
     def do_inspect():
         if state["busy"]:
             return
-        if messagebox.askokcancel("FM-1 Switch – Hardware / backup",
-                "This reads the chip ID and saves two matching full flash reads as a verified backup. "
-                "It loads a checked program into device RAM; it does not erase or write flash.\n\n"
-                "Use this when the device already reaches the chip's UBOOT mode. A running MIDI "
-                "firmware does not expose its flash ID here. Do not interrupt a working firmware "
-                "to force this mode. Unknown chips and keyboards are refused.\n\n"
-                "Next: download the checked RAM loader and request administrator access. Power-cycle "
-                "the device afterwards. Keep full backups private: they contain device and user data.", parent=root):
+        if messagebox.askokcancel("FM-1 Switch – BACKUP",
+                "Save the full 1 MiB flash: boot code, firmware and stored device/user data. "
+                "This does not erase or program flash.\n\n"
+                "Experimental: for a running stock V15 FM-1, this asks the device to enter chip "
+                "recovery (UBOOT) over USB-MIDI after system access is ready. Save your changes first. "
+                "Other running firmware is refused. Devices already in UBOOT need no MIDI command. "
+                "OCT- and OCT+ enter a different, firmware update mode. "
+                "Do not interrupt an installation or damage firmware to force UBOOT.\n\n"
+                "1. Connect only the target FM-1 directly with a USB data cable, without a hub.\n"
+                "2. Select the FM-1 MIDI port if needed. Press OK to allow recovery entry, "
+                "prepare the checked RAM loader and approve system access.\n"
+                "3. Keep it connected while two full reads are compared and the saved file is verified.\n\n"
+                f"Save folder: {rescue_dir()}\n\n"
+                "Success shows the backup path. Switch the FM-1 off and on afterwards. "
+                "Unknown chips and keyboards are refused. Keep backups private: they contain user data.", parent=root):
             run_rescue(None, rescue_dir(), "usb", inspect=True)
 
     def run_rescue(target, d, via, inspect=False, allow_ucun=False):
@@ -994,10 +1153,13 @@ def main():
         state["rescue"] = prog
 
         def work():
+            midi_session = None
             try:
                 path = None if inspect else (target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip())))
                 ui(status.set, "Getting JieLi's flash loader…")
                 R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
+                if inspect and via == "usb" and R.uboot_present() is not True:
+                    midi_session = prepare_backup_midi(backend, port)
                 cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via,
                                                 inspect=inspect, allow_ucun=allow_ucun))
                 ui_wait(status.set, "Waiting for system approval. Take your time with the permission dialog. "
@@ -1005,15 +1167,19 @@ def main():
                         if via == "usb" else "Connecting to the adapter. Firmware has not been changed.")
                 wait = subprocess.Popen(cmd).wait if via != "usb" else run_elevated(cmd)
             except Exception as e:
+                if midi_session:
+                    midi_session.close()
                 ui(status.set, f"Rescue not started: {e}")
+                ui(messagebox.showerror, "FM-1 Switch – BACKUP" if inspect else "FM-1 Switch – Rescue", str(e))
                 ui(end_rescue)
                 return
             state["rescue"] = prog
             done, pos, end, hardware = {"code": None}, 0, None, None
             t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
             t.start()
+            transition_error = None
             def handle_events(ev):
-                nonlocal end, hardware
+                nonlocal end, hardware, transition_error
                 for e in ev:
                     if "say" in e:
                         ui(status.set, e["say"])
@@ -1025,6 +1191,14 @@ def main():
                         if e["step"] == "ready":
                             ui(rb.configure, text="Stop")
                             ui(rb.state, ["!disabled"])
+                            if midi_session:
+                                try:
+                                    if midi_session.enter(lambda: Path(prog + ".stop").exists()):
+                                        ui(status.set, "Recovery key sent to stock V15. Waiting for USB UBOOT; "
+                                           "keep connected. No backup verified yet.")
+                                except Exception as exc:
+                                    transition_error = str(exc)
+                                    Path(prog + ".stop").touch()
                         if e["step"] == "write":
                             ui(rb.state, ["disabled"])
                             ui(bar.configure, value=e["value"])
@@ -1040,6 +1214,10 @@ def main():
                     handle_events(ev)
                     break
                 time.sleep(0.2)
+            if midi_session:
+                midi_session.close()
+            if transition_error:
+                end = {"end": "fail", "error": transition_error}
             if end and end["end"] == "ok" and inspect:
                 msg = (hardware_text(end["hardware"]) + "\n\nBackup verified: " + end["backup"]
                        + ".\nThe .json beside it contains the chip details and backup hash. "
@@ -1057,7 +1235,7 @@ def main():
                 ui(set_tone, "ok" if confirmed else "off")
                 ui(status.set, msg)
                 ui(messagebox.showinfo, "FM-1 Switch", msg)
-            elif end and "did not appear" in (end.get("error") or "") and via == "usb":
+            elif end and "did not appear" in (end.get("error") or "") and via == "usb" and not inspect:
                 ui(status.set, "Rescue: the FM-1 did not show up in the chip's update mode.")
                 ui(open_guide, "rescue_failed")
             elif end:
@@ -1240,19 +1418,21 @@ def main():
             folders.append(Path(d))
             refresh()
 
-    ib = ttk.Button(row, text="Install", style="Accent.TButton", width=12, command=do_install)
-    rb = ttk.Button(row, text="Rescue…", command=lambda: do_rescue())
+    ib = ttk.Button(row, text="Install", style="Install.TButton", width=12, command=do_install)
+    rb = ttk.Button(row, text="Rescue…", style="Rescue.TButton", command=lambda: do_rescue())
     buttons = [ttk.Button(card_btns, text="Check / unbrick…", command=open_guide),
-               ttk.Button(row, text="Add folder…", command=add_folder),
-               ttk.Button(row, text="Refresh", command=refresh), ib, rb,
-               ttk.Button(card_btns, text="Hardware / backup…", command=do_inspect)]
+               ttk.Button(row, text="Add folder…", style="Utility.TButton", command=add_folder),
+               ttk.Button(row, text="Refresh", style="Utility.TButton", command=refresh), ib, rb,
+               ttk.Button(card_btns, text="BACKUP…", style="Backup.TButton", width=18, command=do_inspect)]
+    buttons[0].configure(style="Check.TButton", width=18)
     buttons[0].pack()
-    buttons[5].pack(pady=(px(4), 0))
+    buttons[5].pack(pady=(px(8), 0))
+    tk.Label(card_btns, text="Full flash · V15 / UBOOT", background=C["card"], foreground=C["muted"], font=small_f, padx=0, pady=0).pack(pady=(px(4), 0))
     buttons[1].pack(side="left", padx=(0, px(8)))
     buttons[2].pack(side="left")
     ib.pack(side="right")
     rb.pack(side="right", padx=(0, px(8)))
-    ttk.Button(head, text="About", command=lambda: messagebox.showinfo(
+    ttk.Button(head, text="About", style="Utility.TButton", command=lambda: messagebox.showinfo(
         "About FM-1 Switch", f"FM-1 Switch {app_version()}\n\n" + DISCLAIMER
         + "\n\nSource and licence: github.com/Saintpid/FM1-Switch (GPL-3.0)")).pack(side="right")
 

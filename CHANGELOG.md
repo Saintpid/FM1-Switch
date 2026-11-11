@@ -2,6 +2,43 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.6
+
+- Give the primary action buttons a contrasting keyboard-focus outline in both light and dark themes.
+
+## 1.4.5
+
+- Refine the window with neutral surfaces, one restrained accent, outlined secondary actions,
+  improved typography/spacing and matching device-card buttons. Keep the existing action locations.
+- Fix square-looking corners caused by ttk background fill with surface-matched antialiased
+  rounded borders; retain hover, disabled and keyboard-focus states.
+- Fit status instructions to the actual available column width; show concise connection guidance
+  and route detailed troubleshooting through Check / unbrick instead of clipping a wall of text.
+
+## 1.4.4
+
+- Keep rounded action buttons with colour, hover, disabled and keyboard-focus states.
+- Match Check / unbrick and BACKUP button dimensions, font and padding without moving them.
+
+## 1.4.3
+
+- Refresh the byte-identical Mac package helper and its plugin-version dependency from shared sources.
+
+- Experimental BACKUP entry from a running stock FM-1 V15 over USB-MIDI. Identify a unique
+  target, prepare the loader and obtain system access first; recheck identity and send the
+  ROM-entry key once only after the recovery helper reports ready. Stop prevents key delivery.
+- Refuse other running firmware, update loaders, keyboards, ambiguous ports and unrelated output
+  pairings. Existing UBOOT backup still works without MIDI; no flash write gates changed.
+- Real-device direct USB transition and installed Mac acceptance remain pending. Save changes
+  before entering recovery and power-cycle after backup. Do not treat this as risk-free.
+
+## 1.4.2
+
+- Highlight BACKUP in green, Install in blue and Rescue in amber without moving the controls.
+- Explain full-flash contents, the save folder, system approval, verification and power-cycling
+  in numbered backup instructions. Explicitly distinguish chip UBOOT from the OCT-/OCT+
+  firmware update mode: automatic MIDI-to-UBOOT entry is not implemented in this version.
+
 ## 1.4.1
 
 - **Firmware checked against the flash before flashing.** The app area of the chosen `.fwsc` is

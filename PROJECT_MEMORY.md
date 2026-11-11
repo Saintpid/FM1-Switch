@@ -1,5 +1,58 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.6 final keyboard focus check
+
+The 1.4.5 visual refresh built and exported successfully. Final source review found that the
+primary button focus outline matched its fill; 1.4.6 uses a contrasting outline for keyboard
+navigation. Keep 1.4.5 historical exports unchanged. Both versions keep flash/MIDI behavior unchanged.
+
+## 2026-11-11 — 1.4.5 visual design correction
+
+User's actual 1.4.4 screenshot exposed square-looking corners, competing colours and clipped
+status copy despite construction tests. Do not treat image transparency or matching dimensions
+as visual acceptance. Reworked main UI with neutral light/dark surfaces, one blue accent,
+outlined secondary actions, explicit surface-matched antialiased button corners, consistent
+utility buttons, stronger typography, quieter table headings/selection and a thin progress line.
+Check and BACKUP keep equal dimensions and original positions. Status wraps to its actual grid
+column width and missing-device advice is concise, with detailed help in Check / unbrick.
+Visual QA uses .git/preview_ui.py (not shipped), mocked MIDI/USB, simulated package rows and
+computer-use screenshots; real hardware must not be probed during verification. Mac/device
+backup acceptance remains separate. Native helper launch and flash safety code unchanged.
+
+## 2026-11-11 — 1.4.4 rounded, matching controls
+
+User requested rounded corners and equal Check / unbrick and BACKUP sizes. Custom Tk image
+borders preserve action colours, round corners, keyboard focus and disabled/hover states in
+Sun Valley and clam themes; the two device-card buttons share width/font/padding. Positions kept.
+Validation: 1.4.4 install/switch/rescue/export simulations passed; light/dark Tk smoke confirms
+matching 213x55 device-card buttons on this Windows display. Normative release.ps1 built the
+unsigned Windows installer and verified its setup-folder copy. Builder accepted the local
+1.4.4 Mac source ZIP; ZIP/runner/flow copies to SEM were size/SHA-256 verified. Exported shared
+runtime bytes were also compared to canonical sources. No real hardware or signed Mac acceptance.
+
+The preceding 1.4.3 Windows installer built (unsigned) and Mac source ZIP passed Builder and
+verified SEM copies. Its release gate required updating package_common.py and plugin_version.py
+byte-identically from Follower. Simulated GUI confirms approval -> helper ready -> one ROM key,
+error display and closed MIDI links; no real hardware accessed. Actual Mac/device QA still pending.
+
+## 2026-11-11 — 1.4.3 experimental backup MIDI entry
+
+User authorized building/testing the backup workflow. BACKUP prepares a unique MIDI target,
+accepts only FM-1 version 15 identity, and keeps its link until system approval/helper ready.
+Re-identifies then sends F0 22 24 35 7D F7 once (upstream FM-1-transporter/src/pio_host.c).
+Stop/identity loss/failure blocks delivery; no upgrade command, firmware patch or flash writes.
+Other firmware, loaders/keyboards and ambiguous targets are refused. Existing UBOOT bypasses
+MIDI. Direct USB transition, real backup and installed Mac acceptance remain pending; all
+verification must be simulated. MIDI identity is not cryptographic firmware attestation.
+
+## 2026-11-11 — 1.4.2 clearer backup controls
+
+Kept button placement; BACKUP green, Install blue, Rescue amber. Backup instructions now name
+full flash contents, actual save folder, direct cable, system approval, two-read verification and
+power-cycle. UBOOT is distinguished from OCT-/OCT+ firmware update mode. Automatic MIDI soft-key
+entry remains unimplemented; do not claim one-click backup of a normally running unit yet.
+No hardware commands or flash safety policy changed. Actual UI/Mac/device acceptance remains pending.
+
 ## 2026-11-09 — 1.4.1 firmware flash-support check
 
 Built on the 1.4.0 branch with main (1.3.3) merged; 1.4.0's UCUN opt-in kept over 1.3.3's plain
@@ -173,3 +226,4 @@ problems above are still pending; no new export, signing, installer or Mac QA
 has been performed. Do not describe the README/changelog's existing Builder
 support claim as verified acceptance. Use this memory and the normative release
 specification to implement the next version, then update the README/tests together.
+Validation: install, switch, rescue and export simulation suites passed. Tk construction smoke check passed with MIDI disabled; no hardware accessed. No installer/export release performed.
