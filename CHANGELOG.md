@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.2
+
+- Highlight BACKUP in green, Install in blue and Rescue in amber without moving the controls.
+- Explain full-flash contents, the save folder, system approval, verification and power-cycling
+  in numbered backup instructions. Explicitly distinguish chip UBOOT from the OCT-/OCT+
+  firmware update mode: automatic MIDI-to-UBOOT entry is not implemented in this version.
+
 ## 1.4.1
 
 - **Firmware checked against the flash before flashing.** The app area of the chosen `.fwsc` is

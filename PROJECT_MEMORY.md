@@ -1,5 +1,13 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.2 clearer backup controls
+
+Kept button placement; BACKUP green, Install blue, Rescue amber. Backup instructions now name
+full flash contents, actual save folder, direct cable, system approval, two-read verification and
+power-cycle. UBOOT is distinguished from OCT-/OCT+ firmware update mode. Automatic MIDI soft-key
+entry remains unimplemented; do not claim one-click backup of a normally running unit yet.
+No hardware commands or flash safety policy changed. Actual UI/Mac/device acceptance remains pending.
+
 ## 2026-11-09 — 1.4.1 firmware flash-support check
 
 Built on the 1.4.0 branch with main (1.3.3) merged; 1.4.0's UCUN opt-in kept over 1.3.3's plain
@@ -173,3 +181,4 @@ problems above are still pending; no new export, signing, installer or Mac QA
 has been performed. Do not describe the README/changelog's existing Builder
 support claim as verified acceptance. Use this memory and the normative release
 specification to implement the next version, then update the README/tests together.
+Validation: install, switch, rescue and export simulation suites passed. Tk construction smoke check passed with MIDI disabled; no hardware accessed. No installer/export release performed.

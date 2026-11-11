@@ -39,12 +39,16 @@ firmware author's acceptance.
 
 ### Hardware identification and backup in 1.4.0
 
-**Hardware / backup…** reads the chip key, flash type and JEDEC ID when the device already reaches
+**BACKUP…** (green, in the device panel; previously Hardware / backup) reads the chip key, flash type and JEDEC ID when the device already reaches
 the chip's UBOOT mode. It starts a hash-checked program in device RAM, then saves two matching full
 flash reads and verifies the saved file. It does not erase or program flash and needs no firmware
 package. Administrator access is requested separately; the device timer starts after approval.
 Power-cycle afterwards. A working MIDI firmware does not expose its flash ID through this tool;
-do not damage or interrupt a working firmware to force UBOOT.
+do not damage or interrupt a working firmware to force UBOOT. OCT- and OCT+ enter the
+firmware update mode, not chip UBOOT. This version does not send a MIDI command to enter UBOOT.
+The backup dialog shows the save folder and numbered connection, approval and verification steps.
+Install is blue and writes the selected firmware; Rescue is amber and opens the protected recovery
+workflow. The controls remain in their original positions.
 
 The report names Puya P25Q80H (`856014`), UCUN UC25HQ80 (`B36014`) and the known keyboard flash
 (`EB6014`). Unknown parts and keyboards are refused. Identification reports are saved even for

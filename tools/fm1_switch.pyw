@@ -718,6 +718,21 @@ def main():
     head_f = (family, 15 if mac else 12, "bold")
     title_f = (family, 22 if mac else 18, "bold")
     st = ttk.Style()
+    # Use a colourable border even when Sun Valley uses image-backed buttons.
+    st.element_create("Action.border", "from", "clam", "Button.border")
+    action_layout = [("Action.border", {"sticky": "nswe", "children": [
+        ("Button.padding", {"sticky": "nswe", "children": [
+            ("Button.label", {"sticky": "nswe"})]})]})]
+    for name, colour, hover in (("Backup", "#146b46", "#105638"),
+                                ("Install", "#175bb5", "#12498f"),
+                                ("Rescue", "#925000", "#733e00")):
+        style = name + ".TButton"
+        st.layout(style, action_layout)
+        st.configure(style, background=colour, foreground="white", font=head_f,
+                     padding=(px(12), px(8)))
+        st.map(style, background=[("disabled", "#575757"), ("pressed", hover),
+                                  ("active", hover)],
+               foreground=[("disabled", "#d0d0d0")])
     st.configure("Muted.TLabel", foreground=C["muted"], font=small_f)
     st.configure("Head.TLabel", font=head_f)
     st.configure("Title.TLabel", font=title_f)
@@ -974,14 +989,19 @@ def main():
     def do_inspect():
         if state["busy"]:
             return
-        if messagebox.askokcancel("FM-1 Switch – Hardware / backup",
-                "This reads the chip ID and saves two matching full flash reads as a verified backup. "
-                "It loads a checked program into device RAM; it does not erase or write flash.\n\n"
-                "Use this when the device already reaches the chip's UBOOT mode. A running MIDI "
-                "firmware does not expose its flash ID here. Do not interrupt a working firmware "
-                "to force this mode. Unknown chips and keyboards are refused.\n\n"
-                "Next: download the checked RAM loader and request administrator access. Power-cycle "
-                "the device afterwards. Keep full backups private: they contain device and user data.", parent=root):
+        if messagebox.askokcancel("FM-1 Switch – BACKUP",
+                "Save the full 1 MiB flash: boot code, firmware and stored device/user data. "
+                "This does not erase or program flash.\n\n"
+                "Before you start: this version requires the FM-1 to already reach chip recovery "
+                "(UBOOT). It cannot switch a normally running FM-1 into UBOOT for you. "
+                "OCT- and OCT+ enter a different, firmware update mode. "
+                "Do not interrupt an installation or damage firmware to force UBOOT.\n\n"
+                "1. Connect only the target FM-1 directly with a USB data cable, without a hub.\n"
+                "2. Press OK to prepare the checked RAM loader and approve system access.\n"
+                "3. Keep it connected while two full reads are compared and the saved file is verified.\n\n"
+                f"Save folder: {rescue_dir()}\n\n"
+                "Success shows the backup path. Switch the FM-1 off and on afterwards. "
+                "Unknown chips and keyboards are refused. Keep backups private: they contain user data.", parent=root):
             run_rescue(None, rescue_dir(), "usb", inspect=True)
 
     def run_rescue(target, d, via, inspect=False, allow_ucun=False):
@@ -1240,14 +1260,15 @@ def main():
             folders.append(Path(d))
             refresh()
 
-    ib = ttk.Button(row, text="Install", style="Accent.TButton", width=12, command=do_install)
-    rb = ttk.Button(row, text="Rescue…", command=lambda: do_rescue())
+    ib = ttk.Button(row, text="Install", style="Install.TButton", width=12, command=do_install)
+    rb = ttk.Button(row, text="Rescue…", style="Rescue.TButton", command=lambda: do_rescue())
     buttons = [ttk.Button(card_btns, text="Check / unbrick…", command=open_guide),
                ttk.Button(row, text="Add folder…", command=add_folder),
                ttk.Button(row, text="Refresh", command=refresh), ib, rb,
-               ttk.Button(card_btns, text="Hardware / backup…", command=do_inspect)]
+               ttk.Button(card_btns, text="BACKUP…", style="Backup.TButton", command=do_inspect)]
     buttons[0].pack()
     buttons[5].pack(pady=(px(4), 0))
+    ttk.Label(card_btns, text="Full flash • requires UBOOT", style="Muted.TLabel").pack(pady=(px(4), 0))
     buttons[1].pack(side="left", padx=(0, px(8)))
     buttons[2].pack(side="left")
     ib.pack(side="right")
