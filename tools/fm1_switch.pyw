@@ -782,16 +782,37 @@ def main():
     head_f = (family, 15 if mac else 12, "bold")
     title_f = (family, 22 if mac else 18, "bold")
     st = ttk.Style()
-    # Use a colourable border even when Sun Valley uses image-backed buttons.
-    st.element_create("Action.border", "from", "clam", "Button.border")
-    action_layout = [("Action.border", {"sticky": "nswe", "children": [
-        ("Button.padding", {"sticky": "nswe", "children": [
-            ("Button.label", {"sticky": "nswe"})]})]})]
+    # Rounded, stretchable images keep the action colours in both ttk themes.
+    button_images = []  # Tk images must stay alive until the window closes.
+    def rounded_image(colour, focus=False):
+        radius = max(4, px(9))
+        size = radius * 2 + px(10)
+        im = tk.PhotoImage(master=root, width=size, height=size)
+        def fill(inset, fill_colour):
+            r = max(1, radius - inset)
+            for y in range(inset, size - inset):
+                dy = max(r - (y - inset + 0.5), (y - inset + 0.5) - (size - 2 * inset - r), 0)
+                edge = int(r - max(0, r * r - dy * dy) ** 0.5 + 0.5)
+                im.put(fill_colour, to=(inset + edge, y, size - inset - edge, y + 1))
+        fill(0, "#ffffff" if focus else colour)
+        if focus:
+            fill(max(1, px(2)), colour)
+        button_images.append(im)
+        return im
     for name, colour, hover in (("Backup", "#146b46", "#105638"),
+                                ("Check", "#5252a3", "#414182"),
                                 ("Install", "#175bb5", "#12498f"),
                                 ("Rescue", "#925000", "#733e00")):
         style = name + ".TButton"
-        st.layout(style, action_layout)
+        element = name + ".rounded"
+        normal, disabled, active, focus = (rounded_image(colour), rounded_image("#575757"),
+                                            rounded_image(hover), rounded_image(colour, True))
+        st.element_create(element, "image", normal, ("disabled", disabled),
+                          ("pressed", active), ("focus", focus), ("active", active),
+                          border=px(9), sticky="nswe")
+        st.layout(style, [(element, {"sticky": "nswe", "children": [
+            ("Button.padding", {"sticky": "nswe", "children": [
+                ("Button.label", {"sticky": "nswe"})]})]})])
         st.configure(style, background=colour, foreground="white", font=head_f,
                      padding=(px(12), px(8)))
         st.map(style, background=[("disabled", "#575757"), ("pressed", hover),
@@ -1350,7 +1371,8 @@ def main():
     buttons = [ttk.Button(card_btns, text="Check / unbrick…", command=open_guide),
                ttk.Button(row, text="Add folder…", command=add_folder),
                ttk.Button(row, text="Refresh", command=refresh), ib, rb,
-               ttk.Button(card_btns, text="BACKUP…", style="Backup.TButton", command=do_inspect)]
+               ttk.Button(card_btns, text="BACKUP…", style="Backup.TButton", width=19, command=do_inspect)]
+    buttons[0].configure(style="Check.TButton", width=19)
     buttons[0].pack()
     buttons[5].pack(pady=(px(4), 0))
     ttk.Label(card_btns, text="Full flash • V15 / UBOOT", style="Muted.TLabel").pack(pady=(px(4), 0))

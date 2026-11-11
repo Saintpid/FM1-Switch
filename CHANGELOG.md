@@ -2,6 +2,11 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.4.4
+
+- Keep rounded action buttons with colour, hover, disabled and keyboard-focus states.
+- Match Check / unbrick and BACKUP button dimensions, font and padding without moving them.
+
 ## 1.4.3
 
 - Refresh the byte-identical Mac package helper and its plugin-version dependency from shared sources.

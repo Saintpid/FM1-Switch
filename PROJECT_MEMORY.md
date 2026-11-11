@@ -1,5 +1,15 @@
 # FM-1 Switch project memory
 
+## 2026-11-11 — 1.4.4 rounded, matching controls
+
+User requested rounded corners and equal Check / unbrick and BACKUP sizes. Custom Tk image
+borders preserve action colours, round corners, keyboard focus and disabled/hover states in
+Sun Valley and clam themes; the two device-card buttons share width/font/padding. Positions kept.
+The preceding 1.4.3 Windows installer built (unsigned) and Mac source ZIP passed Builder and
+verified SEM copies. Its release gate required updating package_common.py and plugin_version.py
+byte-identically from Follower. Simulated GUI confirms approval -> helper ready -> one ROM key,
+error display and closed MIDI links; no real hardware accessed. Actual Mac/device QA still pending.
+
 ## 2026-11-11 — 1.4.3 experimental backup MIDI entry
 
 User authorized building/testing the backup workflow. BACKUP prepares a unique MIDI target,
