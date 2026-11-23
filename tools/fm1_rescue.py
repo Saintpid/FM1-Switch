@@ -463,6 +463,10 @@ class MflrLoader:
 IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x4D014
 IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400
 IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x560000
+CFA_HINT = (". Windows Security's Controlled folder access may be blocking FM-1 Switch from the FM-1's "
+            "update-mode disk: Windows Security > Virus & threat protection > Manage ransomware protection > "
+            "Allow an app through Controlled folder access > Add an allowed app > FM1-Switch.exe (in "
+            "C:\\Program Files\\Noisebud\\FM-1 Switch)")
 FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME = 0x90018, 0x90020
 DATA_OUT, DATA_IN = 0, 1
 
@@ -520,7 +524,8 @@ class Win32:
     def ioctl(self, h, code, inbuf, n_in, outbuf, n_out):
         got = self.W.DWORD(0)
         if not self.k.DeviceIoControl(h, code, inbuf, n_in, outbuf, n_out, self.C.byref(got), None):
-            raise Fail(f"Windows refused the command (error {self.C.get_last_error()})")
+            e = self.C.get_last_error()
+            raise Fail(f"Windows refused the command (error {e})" + (CFA_HINT if e == 5 else ""))
         return got.value
 
     def close(self, h):
@@ -577,8 +582,9 @@ def volumes_on(disk, win):
 
 class WinScsi:
     """the same xfer() as Bot, through IOCTL_SCSI_PASS_THROUGH_DIRECT on the UBOOT disk. A drive
-    letter Windows mounted on it is locked and dismounted first (while one is mounted, Windows refuses
-    the chip's commands with error 5), and stays locked until close()"""
+    letter Windows mounted on it is locked and dismounted first (so no file system or AutoPlay reads it
+    meanwhile), and stays locked until close(). Error 5 was seen with Defender's Controlled folder
+    access on: its message says how to allow the app"""
 
     def __init__(self, path, win=None, say=None):
         self.win = win or Win32()
@@ -602,7 +608,7 @@ class WinScsi:
         self.h = self.win.open(path, True)
         if self.h is None:
             self.close()
-            raise Fail(f"cannot open {path} (run as administrator)")
+            raise Fail(f"cannot open {path} (run as administrator; or" + CFA_HINT[1:] + ")")
 
     def reset_recovery(self):
         pass                                                 # the disk driver does its own

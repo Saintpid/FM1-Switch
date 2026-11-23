@@ -1160,5 +1160,8 @@ ok(1000 + ord("G") in fw.closed and 102 in fw.closed, "Windows: closing gives it
 ok(R.Uboot(R.WinScsi(r"\\.\PhysicalDrive2", FakeWin32(FakeUboot(base)))).inquiry()[0] == "WL82",
    "Windows: with no drive letter, nothing to lock")
 
+ok("Controlled folder access" in R.CFA_HINT and "FM1-Switch.exe" in R.CFA_HINT,
+   "Windows: error 5 tells how to allow the app through Controlled folder access")
+
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)
