@@ -1067,7 +1067,9 @@ def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=
     dev.show(12, " DO NOT SWITCH OFF", SCREEN_AMBER)
     dev.boot_write = True
     try:
-        # the sector with the flash header and the file table last: until then the old table is whole
+        # the sector with the flash header and the file table last. A cut before the last sector still
+        # leaves a boot area that cannot start (the old table points at a half-replaced bootloader): the
+        # FM-1 then needs update mode from the ROM or the adapter, and the backup put back (restore())
         for i, a in enumerate(sorted(diff, reverse=True)):
             for attempt in range(3):
                 try:
