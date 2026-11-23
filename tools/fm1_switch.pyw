@@ -107,8 +107,8 @@ def package_at(f):
         product = I.product_of(raw)
     except (OSError, I.InstallError):
         return None
-    if R.sha256(raw) == R.STOCK_SHA256:
-        return Package(f, product, "v15")
+    if R.sha256(raw) in R.STOCK_FM1:                          # M-VAVE's own: V15 or 016
+        return Package(f, product or f"FM-1_{R.STOCK_FM1[R.sha256(raw)].lstrip('V').zfill(3)}", "v15")
     if I.keyboard_stock(raw):
         return Package(f, I.keyboard_stock(raw), "stock")
     if re.fullmatch(r"[^_]+_\d+", product) and I.model_of(product) == "FM-1":
@@ -268,9 +268,29 @@ def install_error_text(error):
 
 
 def hardware_text(info):
+    found = ""
+    if info.get("bootloader_text"):
+        found = (f"Bootloader: {info['bootloader_text']}.\n"
+                 f"Firmware: {info.get('firmware', 'unknown')}"
+                 + ("" if info.get("firmware_status") in (None, "ok") else f" ({info['firmware_status'].replace('_', ' ')})")
+                 + ".\n")
     return (f"{info['flash_name']} — JEDEC {info['jedec_id']}\n"
-            f"Chip key {info['chip_key']}, flash type {info['flash_type']}.\n"
+            f"Chip key {info['chip_key']}, flash type {info['flash_type']}.\n" + found +
             "Firmware compatibility and persistent saves are not established by this identification.")
+
+
+UPDATE_MODE_KEYS = ("If it does not appear: with Wild, NB303 or Felucca, hold OCT− and OCT+ for 5 seconds; with "
+                    "the rescue bootloader (m-bootloader), hold REC while switching the FM-1 on.")
+
+
+def send_update_mode(backend, port=None):
+    """the soft key to an FM-1 that answers on MIDI -> its identity text, or None (none answered)"""
+    if backend is None:
+        return None
+    try:
+        return I.enter_update_mode(I.Updater(backend, port=port))
+    except I.InstallError:
+        return None
 
 
 def step_text(kind, value=None):
@@ -573,7 +593,9 @@ def helper_command(args, platform=sys.platform, sysctl=_sysctl_int):
 
 
 def rescue_args(target, d, progress, any_firmware=False, via="usb", inspect=False, allow_ucun=False):
-    a = (["--inspect"] if inspect else [str(target), "--write"]) + ["--backup-dir", str(d), "--loader", str(d / R.LOADER_NAME),
+    # over USB, M-Flasher's loader (checked copies in d); JieLi's through the transporter
+    loader = ["--mflr-dir", str(d)] if via == "usb" else ["--loader", str(d / R.LOADER_NAME)]
+    a = (["--inspect"] if inspect else [str(target), "--write"]) + ["--backup-dir", str(d), *loader,
          "--wait", "300", "--tries", "5", "--progress", str(progress)]
     if allow_ucun and not inspect:
         a.append("--allow-ucun-write")
@@ -996,8 +1018,11 @@ def main():
         def work():
             try:
                 path = None if inspect else (target.path if target else R.download_stock(str(d), lambda t: ui(status.set, t.strip())))
-                ui(status.set, "Getting JieLi's flash loader…")
-                R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
+                ui(status.set, "Getting the flash loader…")
+                if via == "usb":
+                    R.get_mflr(str(d), lambda t: ui(status.set, t.strip()))
+                else:
+                    R.get_loader(None, str(d), lambda t: ui(status.set, t.strip()))
                 cmd = helper_command(rescue_args(path, d, prog, target is not None and target.kind != "v15", via,
                                                 inspect=inspect, allow_ucun=allow_ucun))
                 ui_wait(status.set, "Waiting for system approval. Take your time with the permission dialog. "
@@ -1025,6 +1050,10 @@ def main():
                         if e["step"] == "ready":
                             ui(rb.configure, text="Stop")
                             ui(rb.state, ["!disabled"])
+                            if via == "usb":                 # a running FM-1: the soft key, no keys to hold
+                                sent = send_update_mode(backend, port)
+                                ui(status.set, f"Restarting the FM-1 ({sent}) in update mode… " + UPDATE_MODE_KEYS
+                                   if sent else "Waiting for the FM-1 in update mode. " + UPDATE_MODE_KEYS)
                         if e["step"] == "write":
                             ui(rb.state, ["disabled"])
                             ui(bar.configure, value=e["value"])

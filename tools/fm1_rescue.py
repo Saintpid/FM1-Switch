@@ -42,15 +42,36 @@ import urllib.request
 import uuid
 import zlib
 
+import fm1_flash as FL
+from fm1_flash import crc32
+
 VID, PID = 0x4C4A, 0x8057
-STOCK_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a"
+STOCK_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a"      # V15
+STOCK_016_SHA256 = "d017fb65e70aca97ee29d944470c3515a74581df5c0576bf70de917c7b2b61d5"  # 016 (M-Flasher's docs)
+# M-VAVE's own FM-1 packages, by their SHA-256 (kind "v15" below stands for either)
+STOCK_FM1 = {STOCK_SHA256: "V15", STOCK_016_SHA256: "016"}
+# M-VAVE's download, which served V15 and now serves 016 (the newest): either is taken, checked
 STOCK_URL = "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc"
 STOCK_NAME = "FM-1-V15.fwsc"
+STOCK_NAMES = {"V15": STOCK_NAME, "016": "FM-1-016.fwsc"}
 LOADER_NAME = "wl82loader.bin"
 LOADER_URL = ("https://raw.githubusercontent.com/kagaimiq/jl-uboot-tool/"
               "c32b28e7a04f873f526ba929cb1bae9f05442fe9/data/loaderblobs/usb/wl82loader.bin")
 LOADER_SHA256 = "d41da6126760c9d66660bcc0cac8d27d221806c5e369a8036921efe68dca5376"
 LOADER_ADDR, LOADER_ARG = 0x1C02000, 0x0001
+# M-Flasher's flash loader (MFLR), from m-bootloader's releases (github.com/jvitkauskas/m-bootloader,
+# MIT, (c) 2026 Julius Vitkauskas; see third_party/NOTICE.md), downloaded and checked like JieLi's. It
+# adds the chip's own CRC32 of what was written, the flash's unique ID and text on the FM-1's screen.
+# Built for two RAM slots, so that a new one never overwrites one that is running. Plain: scrambled
+# for the ROM as it is uploaded. v2.3's build, the one M-Flasher ships and that ran on units.
+MFLR_URL = "https://github.com/jvitkauskas/m-bootloader/releases/download/v2.3/"
+MFLR = (("mflr-loader-a.bin", 0x01C20000, "ae0cdf4965cc2438a362e933ccf11d41159322d67f2dc630a61ab84cc58e04d7"),
+        ("mflr-loader-b.bin", 0x01C28000, "6f9d97fcd3b16a74dd2b056ebca5e516c56a1c789a4b46b5afdd824d42fd684f"))
+CMD_MFLR_IDENTIFY, CMD_MFLR_CRC32, CMD_MFLR_UNIQUE_ID = 0xFC40, 0xFC41, 0xFC42
+CMD_MFLR_DISPLAY_ON, CMD_MFLR_DISPLAY_TEXT, CMD_MFLR_DISPLAY_BAR, CMD_MFLR_LAST_ERROR = 0xFC43, 0xFC44, 0xFC45, 0xFC46
+CMD_USB_BUFFER_SIZE = 0xFC14
+MFLR_OUT_OF_RANGE = 3                                        # FC46: an address outside the flash
+SCREEN_WHITE, SCREEN_AMBER, SCREEN_MINT = 0xFFFF, 0xFDA0, 0x7F57
 
 FLASH_SIZE = 0x100000
 FM1_FLASH = {0x856014: "Puya P25Q80H", 0xB36014: "UCUN UC25HQ80"}
@@ -64,7 +85,8 @@ FLASH_IDS = tuple(FM1_FLASH)
 TRIM_MARK, TRIM_AT = b"trimdat\0", 0xC1224
 KEYBOARD = ("this is an M-VAVE SMK-37 keyboard (or an MKE-P37), not an FM-1: Rescue is for the FM-1 "
             "only, and an FM-1 firmware must never go on the keyboard; nothing written")
-APP_END = 0x93000          # the .fwsc flash entry is raw flash [0, APP_END)
+APP_END = 0x93000          # the .fwsc flash entry is raw flash [0, APP_END) (FM-1 015, Felucca-based)
+APP_MAX = 0xA9000          # ... or longer, up to here: FM-1 016's image ends at 0xA9000
 WRITE_MIN = 0x4000         # flash header, SPL, isd_config: never written
 SECTOR = 0x1000
 IO = 512
@@ -78,6 +100,10 @@ CMD_READ_KEY, CMD_GET_ONLINE_DEVICE, CMD_RUN_APP = 0xFC09, 0xFC0A, 0xFC0C
 
 class Fail(Exception):
     pass
+
+
+class Refused(Fail):
+    """the device answered, and refused the command (a command the ROM alone does not know)"""
 
 
 # ------------------------------------------------------------------ maths ---
@@ -192,7 +218,7 @@ class Bot:
         if sig != b"USBS" or ctag != tag:
             raise Fail(f"bad status block ({csw.hex()})")
         if status != 0:
-            raise Fail(f"command failed (status {status})")
+            raise Refused(f"command failed (status {status})")
         return got
 
 
@@ -202,8 +228,15 @@ def cdb_for(cmd, args=b""):
 
 # ----------------------------------------------------------------- device ---
 class Uboot:
+    """the chip's UBOOT and a flash loader in its RAM: JieLi's (wl82loader.bin, the one the
+    FM-1-transporter path uses too) or M-Flasher's (MFLR: on-chip CRC32, unique ID, the FM-1's screen)"""
+
     def __init__(self, bot):
         self.bot = bot
+        self.mflr = None                                     # the MFLR version running, if it is ours
+        self.read_io, self.write_io = IO, IO
+        self.screen_on = False
+        self.app_end = APP_END                               # write_sector's upper bound (the package's end)
 
     def inquiry(self):
         r = self.bot.xfer(bytes([0x12, 0, 0, 0, 36, 0]), n_in=36)
@@ -212,7 +245,7 @@ class Uboot:
     def cmd(self, cmd, args=b""):
         r = self.bot.xfer(cdb_for(cmd, args), n_in=16)
         if struct.unpack(">H", r[0:2])[0] != cmd:
-            raise Fail(f"command {cmd:04X} answered as {r[0:2].hex()}")
+            raise Refused(f"command {cmd:04X} answered as {r[0:2].hex()}")
         return r[2:]
 
     def write_block(self, cmd, addr, data):
@@ -220,10 +253,121 @@ class Uboot:
         self.bot.xfer(cdb_for(cmd, args), data_out=data)
 
     def start_loader(self, blob):
+        if isinstance(blob, MflrLoader):
+            return self.start_mflr(blob)
         for off in range(0, len(blob), IO):                  # shipped already ciphered: send raw
             self.write_block(CMD_WRITE_MEMORY, LOADER_ADDR + off, blob[off:off + IO])
         self.cmd(CMD_JUMP, struct.pack(">IH", LOADER_ADDR, LOADER_ARG))
 
+    # ---- M-Flasher's loader (the protocol of M-Flasher's src/jl.rs)
+    def identify(self):
+        """(version, RAM address) of an MFLR loader that answers, else None"""
+        try:
+            r = self.cmd(CMD_MFLR_IDENTIFY)
+        except Refused:
+            return None
+        if r[:4] != b"MFLR":
+            return None
+        return r[4:7].rstrip(b"\0").decode(errors="replace"), struct.unpack(">I", r[8:12])[0]
+
+    def start_mflr(self, loader):
+        running = self.identify()
+        if running is None:
+            try:
+                self.cmd(CMD_GET_ONLINE_DEVICE)
+                other = True
+            except Refused:
+                other = False
+            if other:                                        # JieLi's loader: jumping through it is not safe
+                raise Fail("another flash loader is running on the FM-1: switch it off and on in update mode, "
+                           "then try again; nothing written")
+        if running and running[0] == loader.version:
+            self.mflr = running[0]
+        else:
+            self._start_mflr_slot(loader, running[1] if running else None)
+        if not self._mflr_has_flash():                       # it reads the flash's size once, at its start
+            self._start_mflr_slot(loader, (self.identify() or (None, None))[1])
+            if not self._mflr_has_flash():
+                fid = struct.unpack_from("<I", self.cmd(CMD_GET_ONLINE_DEVICE), 2)[0]
+                raise Fail(f"the flash chip did not identify itself to the loader (its ID now reads {fid:06X}), "
+                           "so the flash cannot be read. Nothing was written: switch the FM-1 off and on and "
+                           "connect it again in update mode")
+        self.read_io = 16384
+        try:
+            n = struct.unpack(">I", self.cmd(CMD_USB_BUFFER_SIZE)[:4])[0]
+            self.write_io = max(256, min(4096, n))
+        except Refused:
+            pass
+
+    def _start_mflr_slot(self, loader, running_at):
+        name, addr, image = loader.slot(running_at)
+        for off in range(0, len(image), IO):                 # plain: scrambled for the ROM, block by block
+            block = bytearray(image[off:off + IO])
+            crc_cipher(block)
+            self.write_block(CMD_WRITE_MEMORY, addr + off, bytes(block))
+        for attempt in range(3):
+            try:
+                self.cmd(CMD_JUMP, struct.pack(">IH", addr, LOADER_ARG))
+                time.sleep(0.1)
+                break
+            except Fail:
+                time.sleep(0.25 * (attempt + 1))
+                got = self.identify()
+                if got and got[1] == addr:                   # it started, its answer was lost
+                    break
+        got = self.identify()
+        if not got:
+            raise Fail("the flash loader did not start: switch the FM-1 off and on in update mode, then try "
+                       "again; nothing written")
+        self.mflr = got[0]
+
+    def _mflr_has_flash(self):
+        """a loader that found no flash refuses every read as out of range (FC46 says so)"""
+        try:
+            self.cmd(CMD_MFLR_LAST_ERROR)
+            try:
+                self.bot.xfer(cdb_for(CMD_READ_FLASH, struct.pack(">IH", 0, 32)), n_in=32)
+            except Fail:
+                pass
+            return self.cmd(CMD_MFLR_LAST_ERROR)[0] != MFLR_OUT_OF_RANGE
+        except Refused:
+            return True
+
+    def crc32(self, addr, n):
+        """CRC32 (IEEE) of n flash bytes at addr, computed on the chip; None without MFLR"""
+        if not self.mflr:
+            return None
+        return struct.unpack(">I", self.cmd(CMD_MFLR_CRC32, struct.pack(">II", addr, n))[:4])[0]
+
+    def unique_id(self):
+        """the flash chip's factory-unique ID (hex), None if it has none or without MFLR"""
+        if not self.mflr:
+            return None
+        try:
+            r = self.cmd(CMD_MFLR_UNIQUE_ID)[:8]
+        except Fail:
+            return None
+        return r.hex() if any(b != 0xFF for b in r) and any(r) else None
+
+    def show(self, row=None, text="", color=SCREEN_WHITE, bar=None):
+        """a line (or a progress bar) on the FM-1's own screen: best effort, never stops a write"""
+        if not self.mflr:
+            return
+        try:
+            if not self.screen_on:
+                self.cmd(CMD_MFLR_DISPLAY_ON, b"\x01")
+                self.screen_on = True
+            if bar is not None:
+                self.cmd(CMD_MFLR_DISPLAY_BAR, bytes([bar]) + struct.pack(">H", color))
+            if row is not None:
+                t = "".join(c if c.isalnum() or c in " -./:<>+?" else " " for c in text.upper())[:20].ljust(20)
+                t = t.encode("ascii", "replace")
+                self.bot.xfer(cdb_for(CMD_MFLR_DISPLAY_TEXT, bytes([row]) + struct.pack(">HHH", color, 0, len(t))),
+                              data_out=t)
+        except Exception:
+            pass
+
+    # ---- both loaders
     def chip(self):
         p = self.cmd(CMD_READ_KEY, struct.pack(">I", 0x00AC6900))
         k = bytearray([p[5], p[4]])
@@ -235,17 +379,27 @@ class Uboot:
     def read(self, addr, n):
         out = bytearray()
         while len(out) < n:
-            k = min(IO, n - len(out))
-            out += self.bot.xfer(cdb_for(CMD_READ_FLASH, struct.pack(">IH", addr + len(out), k)), n_in=k)
+            k = min(self.read_io, n - len(out))
+            got = self.bot.xfer(cdb_for(CMD_READ_FLASH, struct.pack(">IH", addr + len(out), k)), n_in=k)
+            if len(got) != k:
+                raise Fail(f"short read at {addr + len(out):#x}: {len(got)} of {k} bytes")
+            out += got
         return bytes(out)
 
     def write_sector(self, addr, data):
-        if addr < WRITE_MIN or addr >= APP_END or addr % SECTOR or len(data) != SECTOR:
+        if addr < WRITE_MIN or addr >= min(self.app_end, APP_MAX) or addr % SECTOR or len(data) != SECTOR:
             raise Fail(f"refusing to write {addr:#x}")
         self.cmd(CMD_ERASE_SECTOR, struct.pack(">I", addr))
-        for off in range(0, SECTOR, IO):
-            self.write_block(CMD_WRITE_FLASH, addr + off, data[off:off + IO])
-        if self.read(addr, SECTOR) != data:
+        for off in range(0, SECTOR, self.write_io):
+            chunk = data[off:off + self.write_io]
+            if self.mflr and chunk == b"\xFF" * len(chunk):
+                continue                                     # erased already
+            self.write_block(CMD_WRITE_FLASH, addr + off, chunk)
+        if self.mflr:
+            ok = self.crc32(addr, SECTOR) == crc32(data)
+        else:
+            ok = self.read(addr, SECTOR) == data
+        if not ok:
             raise Fail(f"sector {addr:#07x} did not verify")
 
     def run_app(self):
@@ -255,6 +409,19 @@ class Uboot:
             pass                                             # it may reset before it answers
 
 
+class MflrLoader:
+    """M-Flasher's loader in its two builds: (name, RAM address, plain image) each"""
+
+    def __init__(self, slots):
+        self.slots = slots
+        a = slots[0][2]
+        at = a.find(b"MFLR")
+        self.version = a[at + 4:at + 7].decode(errors="replace") if at >= 0 else "?"
+
+    def slot(self, running_at):
+        """the build for the slot the running loader (at running_at) does not use"""
+        a, b = self.slots
+        return b if running_at is not None and running_at != b[1] else a
 
 
 # ---------------------------------------------------------------- windows ---
@@ -381,7 +548,7 @@ class WinScsi:
         self.win.ioctl(self.h, IOCTL_SCSI_PASS_THROUGH_DIRECT, C.addressof(s), C.sizeof(s),
                        C.addressof(s), C.sizeof(s))
         if s.sptd.ScsiStatus != 0:
-            raise Fail(f"command failed (status {s.sptd.ScsiStatus})")
+            raise Refused(f"command failed (status {s.sptd.ScsiStatus})")
         return buf.raw[:n] if n_in else b""
 
     def close(self):
@@ -609,10 +776,15 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
     key, typ, fid = dev.chip()
     info = flash_info(key, typ, fid)
     say(f"  chip key {key:04X}, flash type {typ}, id {fid:06X}: {info['flash_name']}")
+    if isinstance(dev, Uboot) and dev.mflr:
+        say(f"  flash loader: M-Flasher's {dev.mflr}")
+        uid = dev.unique_id()
+        if uid:
+            info["unique_id"] = uid                          # tells this FM-1 from another (its backups)
     report = os.path.join(backup_dir, f"fm1-hardware-{uuid.uuid4().hex}.json")
     save_report(report, {"schema": 1, "hardware": info,
                         "transport": "transporter" if isinstance(dev, Transporter) else "usb",
-                        "loader_sha256": sha256(loader),
+                        "loader_sha256": loader_sha256(loader),
                         "purpose": "identification; no flash written by this probe"}, owner)
     step("hardware", {**info, "report": report})
     say(f"  hardware report: {report}")
@@ -642,6 +814,15 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
     again = dev.read(0, FLASH_SIZE)
     if len(now) != FLASH_SIZE or now != again:
         raise Fail("backup reads differ or are incomplete; nothing written")
+    chip_crc = dev.crc32(0, FLASH_SIZE) if isinstance(dev, Uboot) else None
+    if chip_crc is not None and chip_crc != crc32(now):
+        raise Fail("the reads do not match the chip's own checksum of the flash; nothing written")
+    found = FL.analyse(now, key)
+    info.update({k: found[k] for k in ("bootloader", "bootloader_text", "bootloader_version", "firmware",
+                                       "firmware_status", "layout", "boot_area_ok")})
+    say(f"  bootloader: {found['bootloader_text']}; firmware: {found['firmware']} "
+        f"({found['firmware_status_text']})")
+    step("analysis", {**found, "map": FL.sector_map(now, key)})
     fd, path = tempfile.mkstemp(prefix=time.strftime("fm1-backup-%Y%m%d-%H%M%S-"),
                                 suffix=".bin", dir=backup_dir)
     with os.fdopen(fd, "wb") as f:
@@ -658,10 +839,11 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
     save_report(path + ".json", {"schema": 1, "hardware": info, "hardware_report": report,
                                "backup_file": os.path.basename(path), "backup_bytes": len(now),
                                "backup_sha256": sha256(now), "matching_full_reads": 2,
+                               "chip_crc32_checked": chip_crc is not None,
                                "saved_file_verified": True}, owner)
     say(f"  backup saved: {path} ({time.time() - t0:.1f} s)")
     step("backup", path)
-    if now[TRIM_AT:TRIM_AT + len(TRIM_MARK)] == TRIM_MARK:  # its calibration: the same flash part as an FM-1's
+    if now[TRIM_AT:TRIM_AT + len(TRIM_MARK)] == TRIM_MARK or found["keyboard"]:  # the same flash part as an FM-1's
         raise Fail(f"{KEYBOARD} (the backup is kept)")
     return now, info, path
 
@@ -669,7 +851,9 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
 def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
            strict_head=True, allow_ucun=False, kind=None):
     """Back up before writing only application sectors. UCUN writes are experimental and opt-in.
-    V15 requires the exact protected head; other firmware keeps the device's own head."""
+    The FM-1's own boot area always stays (as an update leaves it, M-VAVE's V15 and 016 included: they
+    run under m-bootloader and under 016's bootloader), and must be one that can start it. strict_head
+    is kept for callers; it no longer changes anything, as the package's boot area is never written."""
     step = step or (lambda *a: None)
     now, info, _ = inspect_backup(dev, loader, backup_dir, say, step, owner, image, kind)
     if info["experimental"] and (write or confirm is not None):
@@ -681,20 +865,35 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
                        "is experimental: review the backup, then explicitly allow UCUN recovery "
                        "(--allow-ucun-write in the CLI). Use firmware with UCUN support.")
         say("  EXPERIMENTAL UCUN recovery: flash verification does not prove persistent saves.")
-    diff = [a for a in range(0, APP_END, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
-    low = [a for a in diff if a < WRITE_MIN]
-    if low and strict_head:
-        raise Fail("the protected head of the flash differs from V15 (sectors "
-                   + " ".join(f"{a:#06x}" for a in low) + "): not writing; send this output and the backup")
-    if low:
-        say("  the package's own head differs from the FM-1's: the FM-1's stays (as an update does)")
-    diff = [a for a in diff if a >= WRITE_MIN]
-    say(f"  {len(diff)} of {(APP_END - WRITE_MIN) // SECTOR} firmware sectors differ from the package")
+    end = len(image)
+    if not APP_END <= end <= APP_MAX or end % SECTOR:
+        raise Fail(f"the firmware image ends at {end:#x}, outside the firmware area; nothing written")
+    try:
+        FL.check_boot_area(now)
+    except FL.FormatError as e:
+        raise Fail(f"the FM-1's own boot area cannot start it ({e}): writing firmware would not help, and "
+                   "the boot area is not written here. Nothing written; keep the backup and ask for help")
+    if now[:WRITE_MIN] != image[:WRITE_MIN]:
+        say(f"  the FM-1's boot area stays ({info.get('bootloader_text', 'its own')}), as an update leaves it")
+    old_layout = FL.layout(now)
+    new_layout = FL.layout(image + now[end:])
+    if old_layout and new_layout and old_layout != new_layout:
+        say(f"  note: the firmware now on the FM-1 keeps its data in another layout ({old_layout}) than this "
+            f"one ({new_layout}): what it leaves behind may confuse the new firmware (wrong presets, no "
+            "sound) until it is reset, or a backup from before is restored")
+        step("layout", {"from": old_layout, "to": new_layout})
+    diff = [a for a in range(WRITE_MIN, end, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
+    say(f"  {len(diff)} of {(end - WRITE_MIN) // SECTOR} firmware sectors differ from the package")
     if not write and confirm is not None:
         write = keep_alive(dev, confirm)
     if not write:
         say("  check passed. Nothing written: run again with --write to put it back.")
         return False
+    if isinstance(dev, Uboot):
+        dev.app_end = end
+        dev.show(3, " INSTALL FIRMWARE")
+        dev.show(5, " WRITING")
+        dev.show(12, " DO NOT SWITCH OFF", SCREEN_AMBER)
     # high to low: X0X's start-up code (low in the app area: its watchdog and its crash counter,
     # which bring it back to update mode) is the last thing replaced if the write is cut short
     for i, a in enumerate(reversed(diff)):
@@ -707,17 +906,22 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
                     raise Fail(f"{e}; the FM-1 is still in update mode: run the rescue again")
         say(f"\r  writing {i + 1}/{len(diff)}", end="")
         step("write", (i + 1) * 100 // len(diff))
+        if isinstance(dev, Uboot):
+            dev.show(bar=(i + 1) * 100 // len(diff), color=SCREEN_MINT)
     if not diff:
         say("  nothing to write: the flash already holds this firmware")
         step("write", 100)
     say("")
     say("  final read ...")
-    expect = now[:WRITE_MIN] + image[WRITE_MIN:APP_END] + now[APP_END:]
+    expect = now[:WRITE_MIN] + image[WRITE_MIN:end] + now[end:]
     final = dev.read(0, FLASH_SIZE)
     if final != expect:
         bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != expect[a:a + SECTOR]]
         raise Fail("final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad)
                    + "; run the rescue again")
+    if isinstance(dev, Uboot):
+        dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
+        dev.show(12, " RESTARTING")
     say("  the flash now holds the firmware. Restarting the FM-1 ...")
     dev.run_app()
     step("done", None)
@@ -779,8 +983,43 @@ def get_loader(path=None, cache_dir=None, say=print):
     return blob
 
 
+def get_mflr(cache_dir=None, say=print, folder=None):
+    """M-Flasher's loader (both builds): from folder, a checked copy in cache_dir, or downloaded from
+    m-bootloader's release (and kept there); each checked against its SHA-256"""
+    slots = []
+    for name, addr, want in MFLR:
+        blob = None
+        for d in (folder, cache_dir):
+            p = os.path.join(d, name) if d else None
+            if p and os.path.isfile(p):
+                b = open(p, "rb").read()
+                if sha256(b) == want:
+                    blob = b
+                    break
+                if d == folder:
+                    raise Fail(f"{name}: unexpected contents")
+        if blob is None:
+            say(f"downloading M-Flasher's flash loader ({name}) ...")
+            blob = fetch(MFLR_URL + name, 30)
+            if sha256(blob) != want:
+                raise Fail(f"{name}: unexpected contents")
+            if cache_dir:
+                try:
+                    with open(os.path.join(cache_dir, name), "wb") as f:
+                        f.write(blob)
+                except OSError:
+                    pass
+        slots.append((name, addr, blob))
+    return MflrLoader(slots)
+
+
+def loader_sha256(loader):
+    return ",".join(sha256(b) for _, _, b in loader.slots) if isinstance(loader, MflrLoader) else sha256(loader)
+
+
 def find_stock(folders):
-    """M-VAVE's V15 among the .fwsc files in the folders (by its SHA-256, whatever its name)"""
+    """M-VAVE's V15 or 016 among the .fwsc files in the folders (by SHA-256, whatever its name; V15 first)"""
+    found = {}
     for d in folders:
         try:
             names = sorted(os.listdir(d))
@@ -790,20 +1029,25 @@ def find_stock(folders):
             p = os.path.join(d, n)
             if n.lower().endswith(".fwsc") and os.path.isfile(p) and os.path.getsize(p) < (4 << 20):
                 try:
-                    if sha256(open(p, "rb").read()) == STOCK_SHA256:
-                        return p
+                    v = STOCK_FM1.get(sha256(open(p, "rb").read()))
+                    if v:
+                        found.setdefault(v, p)
                 except OSError:
                     pass
-    return None
+    return found.get("V15") or found.get("016")
 
 
 def download_stock(dest_dir, say=print):
-    """M-VAVE's V15 from M-VAVE's own server, checked, as dest_dir/FM-1-V15.fwsc"""
-    say("downloading M-VAVE's stock firmware (FM-1 V15) ...")
+    """M-VAVE's FM-1 firmware from M-VAVE's own server, checked (V15 or 016), as dest_dir/FM-1-V15.fwsc
+    or FM-1-016.fwsc"""
+    say("downloading M-VAVE's stock firmware for the FM-1 ...")
     raw = fetch(STOCK_URL)
-    if sha256(raw) != STOCK_SHA256:
-        raise Fail("the downloaded file is not M-VAVE's FM-1 V15 (sha256 mismatch); nothing was done")
-    path = os.path.join(dest_dir, STOCK_NAME)
+    v = STOCK_FM1.get(sha256(raw))
+    if not v:
+        raise Fail("the downloaded file is not an M-VAVE FM-1 firmware this version knows (neither V15 nor 016: "
+                   "sha256 mismatch); nothing was done")
+    say(f"  it is M-VAVE's FM-1 {v}")
+    path = os.path.join(dest_dir, STOCK_NAMES[v])
     with open(path, "wb") as f:
         f.write(raw)
     return path
@@ -811,10 +1055,10 @@ def download_stock(dest_dir, say=print):
 
 def load_stock(path):
     raw = open(path, "rb").read()
-    if sha256(raw) != STOCK_SHA256:
-        raise Fail(f"{path} is not M-VAVE's FM-1 V15 package (sha256 mismatch)")
+    if sha256(raw) not in STOCK_FM1:
+        raise Fail(f"{path} is not M-VAVE's FM-1 V15 or 016 package (sha256 mismatch)")
     image = package_flash_image(raw)
-    if len(image) != APP_END:
+    if not APP_END <= len(image) <= APP_MAX:
         raise Fail("unexpected flash entry size")
     return image
 
@@ -873,13 +1117,15 @@ def product_of(raw):
 
 
 def load_package(path):
-    """-> (image of flash [0, 0x93000), kind, identity) for any FM-1 package. kind: "v15" (M-VAVE's,
-    by its SHA-256), "felucca" (a package with Felucca's update loader: Wild, NB303, n001se,
-    FiMba-1...) or "other" (another FM-1 firmware)"""
+    """-> (image of flash [0, end), kind, identity) for any FM-1 package; end is the package's own
+    (0x93000, or up to 0xA9000 for FM-1 016). kind: "v15" (M-VAVE's own, V15 or 016, by its SHA-256),
+    "felucca" (a package with Felucca's update loader: Wild, NB303, n001se, FiMba-1...) or "other"
+    (another FM-1 firmware)"""
     raw = open(path, "rb").read()
     product = product_of(raw)
-    if sha256(raw) == STOCK_SHA256:
+    if sha256(raw) in STOCK_FM1:
         kind = "v15"
+        product = product or f"FM-1_{STOCK_FM1[sha256(raw)].lstrip('V').zfill(3)}"
     else:
         if product.split("_")[0] != "FM-1":
             raise Fail(f"{path} is not an FM-1 package (identity {product!r})")
@@ -887,7 +1133,11 @@ def load_package(path):
     image = package_flash_image(raw)
     if len(image) < APP_END:
         raise Fail(f"{path}: its flash image is shorter than the firmware area")
-    return image[:APP_END], kind, product or "V15"
+    if kind != "v15":
+        image = image[:APP_END]                              # as before: the firmware area of 015's layout
+    if len(image) > APP_MAX or len(image) % SECTOR:
+        raise Fail(f"{path}: its flash image ({len(image):#x} bytes) reaches past the firmware area")
+    return image, kind, product or "V15"
 
 
 # ----------------------------------------------------------------- device ---
@@ -1070,7 +1320,11 @@ def main(argv=None):
                     help="usb: the chip's update mode on this computer's USB (default); transporter: "
                          "EXPERIMENTAL, through an FM-1-transporter (RP2040) adapter, for an FM-1 that "
                          "shows nothing on USB (needs pyserial, no administrator)")
-    ap.add_argument("--loader", help="a local wl82loader.bin instead of downloading it")
+    ap.add_argument("--loader", help="a local wl82loader.bin instead of downloading it (with --loader-kind jieli)")
+    ap.add_argument("--loader-kind", choices=("mflr", "jieli"), default="mflr",
+                    help="mflr: M-Flasher's flash loader, checks writes with the chip's CRC32 (default over "
+                         "USB); jieli: JieLi's wl82loader.bin, as before 1.5.0 (always with --via transporter)")
+    ap.add_argument("--mflr-dir", help="a folder holding mflr-loader-a.bin and -b.bin instead of downloading them")
     ap.add_argument("--backup-dir", help="where the backup goes (default: beside the package)")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for the FM-1 (default 120)")
     ap.add_argument("--tries", type=int, default=5, help="attempts if it drops out mid-way (default 5)")
@@ -1097,8 +1351,11 @@ def main(argv=None):
             say("  (not V15 and not Felucca-based: if it does not start, it may not fall back to the update "
                 "mode by itself)")
         backup_dir = args.backup_dir or (os.getcwd() if args.inspect else os.path.dirname(os.path.abspath(pkg)))
-        loader = get_loader(args.loader, backup_dir, say)
         via = args.via
+        if via == "usb" and args.loader_kind == "mflr" and not args.loader:
+            loader = get_mflr(backup_dir, say, args.mflr_dir)
+        else:
+            loader = get_loader(args.loader, backup_dir, say)
         if via == "transporter":
             try:
                 import serial  # noqa: F401

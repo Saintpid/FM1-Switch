@@ -2,6 +2,26 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.0
+
+- **No keys to hold to reach the update mode.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303,
+  Felucca), Rescue and Hardware / backup restart it into the chip's own update mode over MIDI. If it
+  does not answer, the window says which keys get it there. `fm1_install.py --update-mode` does the
+  same from the command line.
+- **M-Flasher's flash loader.** Rescue and Hardware / backup now run the loader of M-Flasher
+  (m-bootloader's v2.3 build, downloaded and checked): the chip checks every read and every written
+  sector with its own CRC32, the flash's unique ID is saved with the backup, and the FM-1's screen
+  shows what is happening. JieLi's loader stays for the adapter and with `--loader-kind jieli`.
+- **See what is on the FM-1.** Hardware / backup names the bootloader (M-VAVE's, m-bootloader and its
+  version, or damaged) and the firmware (Wild 0.3.38, FM-1 016, Felucca, ...), and whether it is
+  whole.
+- **M-VAVE's FM-1 016.** M-VAVE's download now gives 016; Rescue takes V15 or 016 and writes 016 whole
+  (to 0xA9000). It points out when the firmware on the FM-1 keeps its data in another layout.
+- **The FM-1 keeps its own bootloader, for V15 too.** A rescue to V15 no longer stops when the FM-1's
+  boot area is not V15's (016's, m-bootloader): it must just be one that can start the FM-1.
+- Thanks to Julius Vitkauskas's [M-Flasher](https://github.com/jvitkauskas/m-flasher) and
+  [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (MIT): their loader, formats and checks.
+
 ## 1.4.1
 
 - **Firmware checked against the flash before flashing.** The app area of the chosen `.fwsc` is

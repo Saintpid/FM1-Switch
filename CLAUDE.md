@@ -12,10 +12,16 @@
   `tools/fm1_install.py` (Felucca's USB-MIDI update) and `tools/fm1_rescue.py` (the chip's own update
   mode, UBOOT: pyusb on Mac/Linux, SCSI pass-through on Windows). Wild and NB303 keep their own
   copies of `fm1_install.py`; a fix to the update protocol belongs in both.
-- Never write below 0x4000 or from 0x93000 in the rescue, and keep its checks (chip key 980F, flash
-  type 3 and exact flash ID 856014 or B36014, the app area decrypting with the chip key,
-  V15's head exactly for V15, a full verified backup first,
-  the explicit risk tick in the window). Any other firmware keeps the FM-1's own head.
+- The rescue never writes below 0x4000 (the boot area) and never from 0x93000, except M-VAVE's
+  own 016, which it writes to its end at 0xA9000 and never past. It refuses a unit whose own boot
+  area cannot start it (`fm1_flash.check_boot_area`) and never writes the head: every firmware keeps
+  the FM-1's own. Keep its checks (chip key 980F, flash type 3 and exact flash ID 856014 or B36014,
+  the app area decrypting with the chip key, a full backup checked against the chip's own CRC32
+  first, the explicit risk tick in the window).
+- The boot area (below 0x4000) may only be written by a dedicated bootloader or restore flow, never
+  by the rescue: after a full verified backup, built with `fm1_flash.boot_area_for` (the unit's
+  chip-key record kept), checked with `check_boot_area` before writing and verified after. Not to
+  be released before m-bootloader has been tried on hardware with Wild and NB303.
 - B36014 (UCUN) writes are experimental and need explicit opt-in, over direct USB only. Unknown
   chips and keyboard/calibration matches are refused. Hardware / backup is an explicit RAM-loader
   session, never a hidden MIDI probe; it must not erase/program flash. Do not weaken these gates.

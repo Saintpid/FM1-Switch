@@ -24,6 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import fm1_rescue as R  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+from fm1_fixture import boot_area, open_boot  # noqa: E402
 
 failed = 0
 
@@ -59,12 +61,12 @@ class FakeUboot:
         a = cdb[2:]
         rom = {R.CMD_WRITE_MEMORY, R.CMD_READ_MEMORY, R.CMD_JUMP}
         if (cmd in rom) != (self.mode == "rom"):
-            raise R.Fail("command failed (status 2)")
+            raise R.Refused("command failed (status 2)")
         if cmd in (R.CMD_WRITE_MEMORY, R.CMD_WRITE_FLASH):
             addr, n = struct.unpack(">IH", a[:6])
             crc = struct.unpack("<H", a[7:9])[0]
             if data_out is None or len(data_out) != n or R.crc16(data_out) != crc:
-                raise R.Fail("command failed (status 2)")
+                raise R.Refused("command failed (status 2)")
             if cmd == R.CMD_WRITE_MEMORY:
                 self.ram[addr] = bytes(data_out)
             else:
@@ -95,7 +97,7 @@ class FakeUboot:
         if cmd == R.CMD_RUN_APP:
             self.ran = True
             return self.reply(cmd)
-        raise R.Fail("command failed (status 2)")
+        raise R.Refused("command failed (status 2)")
 
 
 class FakeWin32:
@@ -254,6 +256,7 @@ class FakeTransporter:
 def flashes():
     rnd = random.Random(7)
     image = bytearray(rnd.randrange(256) for _ in range(R.APP_END))
+    image[:R.WRITE_MIN] = boot_area()                              # M-VAVE's bootloader, working
     app_head(image)
     now = bytearray(image) + bytes(rnd.randrange(256) for _ in range(R.FLASH_SIZE - R.APP_END))
     for a in (0x5000, 0x6000, 0x40000, 0x92000):                  # the crashing firmware's sectors
@@ -320,13 +323,19 @@ except R.Fail as e:
        "different backup reads: refused before erase/write")
 
 bad = bytearray(now)
-bad[0x1234] ^= 1
+bad[0x1234] ^= 1                                                   # in the bootloader: it fails its CRC
 dev = FakeUboot(bad)
 try:
     R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
-    ok(False, "a different head (below 0x4000): refused")
+    ok(False, "the FM-1's own boot area cannot start it: refused")
 except R.Fail as e:
-    ok("not writing" in str(e) and not dev.erased, "a different head (below 0x4000): refused")
+    ok("cannot start it" in str(e) and not dev.erased, "the FM-1's own boot area cannot start it: refused")
+mb = bytearray(now)
+mb[:R.WRITE_MIN] = boot_area(open_boot("2.4-test"))[:R.WRITE_MIN]   # another working bootloader
+dev = FakeUboot(mb)
+ok(R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
+   and bytes(dev.flash) == bytes(mb[:R.WRITE_MIN]) + image[R.WRITE_MIN:] + now[R.APP_END:],
+   "V15 under another working bootloader: written, that bootloader kept")
 
 dev = FakeUboot(now, fid=0x854015)
 try:
@@ -348,8 +357,9 @@ for fid in (0x856014, 0xB36014):
        and meta["backup_sha256"] == R.sha256(now) and meta["matching_full_reads"] == 2
        and meta["saved_file_verified"] and meta["backup_bytes"] == R.FLASH_SIZE,
        f"{fid:06X}: identify and verify full backup without erase/program/runapp")
-    ok(json.loads(Path(steps[0][1]["report"]).read_text())["hardware"] == info
-       and meta["hardware"] == info and info["firmware_compatibility"] == "unknown",
+    rep = json.loads(Path(steps[0][1]["report"]).read_text())["hardware"]
+    ok(all(info[k] == v for k, v in rep.items()) and meta["hardware"] == info
+       and info["firmware_compatibility"] == "unknown" and info["bootloader"] == "stock",
        f"{fid:06X}: measured hardware in standalone report and backup metadata")
 
 dev = FakeUboot(now, fid=R.UCUN_FLASH)
@@ -476,11 +486,8 @@ R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None
 ok(bytes(dev.flash) == now[:R.WRITE_MIN] + image[R.WRITE_MIN:] + now[R.APP_END:] and min(dev.writes) >= R.WRITE_MIN,
    "any firmware: its app area written, the FM-1's own head kept")
 dev = FakeUboot(now)
-try:
-    R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None)
-    ok(False, "V15 (strict head): a different head is still refused")
-except R.Fail:
-    ok(not dev.erased, "V15 (strict head): a different head is still refused")
+R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None)
+ok(bytes(dev.flash)[:R.WRITE_MIN] == now[:R.WRITE_MIN], "V15 too: the package's head is never written")
 wrongkey = bytearray(image)
 app_head(wrongkey, key=0x1234)
 dev = FakeUboot(now)
@@ -587,6 +594,7 @@ if sys.platform == "win32":
 progress = str(Path(tmp) / "denied.jsonl")
 with patch.object(R, "load_package", return_value=(image, "v15", "FM-1_015")), \
      patch.object(R, "get_loader", return_value=LOADER), \
+     patch.object(R, "get_mflr", return_value=LOADER), \
      patch.object(R, "is_admin", return_value=False), \
      patch.object(R, "open_device") as opened:
     code = R.main(["fixture.fwsc", "--write", "--progress", progress])
@@ -622,7 +630,7 @@ with patch.object(R, "get_loader", return_value=LOADER), \
      patch.object(R.sys, "platform", "win32"), \
      patch.object(R, "open_device", return_value=dev), \
      patch.object(R, "load_package") as loaded, patch.object(R, "download_stock") as downloaded:
-    code = R.main(["--inspect", "--backup-dir", tmp, "--progress", progress, "--tries", "1"])
+    code = R.main(["--inspect", "--backup-dir", tmp, "--progress", progress, "--tries", "1", "--loader-kind", "jieli"])
 events, _ = R.read_progress(progress)
 ok(code == 0 and not loaded.called and not downloaded.called and not dev.erased and not dev.writes
    and events[-1]["operation"] == "inspect" and Path(events[-1]["backup"]).exists(),
@@ -684,6 +692,181 @@ dev = FakeUboot(now, fid=0xB36014)
 ok(R.rescue(R.Uboot(dev), image, LOADER, False, tmp, allow_ucun=True, kind="other", say=said.append) is False
    and any("not known" in str(t) for t in said),
    "UCUN unit + firmware without IDs: warned before the backup")
+
+# ---- M-Flasher's loader (MFLR): started in a free RAM slot, the chip's CRC32 checks the writes
+def mflr_image(slot, version=b"2.3"):
+    return random.Random(slot).randbytes(0x300) + b"MFLR" + version + bytes(9) + random.Random(slot + 9).randbytes(5000)
+
+
+MFLR = R.MflrLoader([("mflr-loader-a.bin", 0x01C20000, mflr_image(1)), ("mflr-loader-b.bin", 0x01C28000, mflr_image(2))])
+
+
+class FakeMflr(FakeUboot):
+    """FakeUboot whose ROM also starts M-Flasher's loader: its builds for RAM A and B (uploaded scrambled,
+    each 512-byte block on its own), then its own commands as well as the flash ones"""
+
+    def __init__(self, flash, running=None, has_flash=True, **kw):
+        super().__init__(flash, **kw)
+        self.mflr_at, self.jumps, self.shown, self.crcs = None, [], [], 0
+        self.has_flash = has_flash
+        if running == "jieli":
+            self.mode = "loader"
+        elif running:
+            self.mode, self.mflr_at = "mflr", running
+        self.last_error = 0
+
+    def xfer(self, cdb, data_out=None, n_in=0, timeout=5000):
+        cdb = bytes(cdb)
+        cmd = struct.unpack(">H", cdb[:2])[0] if cdb[0] != 0x12 else None
+        a = cdb[2:]
+        mflr_cmds = {R.CMD_MFLR_IDENTIFY, R.CMD_MFLR_CRC32, R.CMD_MFLR_UNIQUE_ID, R.CMD_MFLR_DISPLAY_ON,
+                     R.CMD_MFLR_DISPLAY_TEXT, R.CMD_MFLR_DISPLAY_BAR, R.CMD_MFLR_LAST_ERROR, R.CMD_USB_BUFFER_SIZE}
+        if cmd == R.CMD_JUMP and self.mode in ("rom", "mflr") and \
+                struct.unpack(">I", a[:4])[0] in [at for _, at, _ in MFLR.slots]:
+            addr = struct.unpack(">I", a[:4])[0]
+            for _, at, img in MFLR.slots:
+                if addr == at:
+                    got = bytearray(b"".join(self.ram[k] for k in sorted(self.ram) if at <= k < at + 0x8000))
+                    for off in range(0, len(got), 512):          # each block scrambled on its own
+                        blk = got[off:off + 512]
+                        R.crc_cipher(blk)
+                        got[off:off + 512] = blk
+                    if bytes(got) == img:
+                        self.mode, self.mflr_at = "mflr", at
+                        self.jumps.append(at)
+            return self.reply(cmd)
+        if self.mode == "mflr" and cmd == R.CMD_WRITE_MEMORY:
+            addr, n = struct.unpack(">IH", a[:6])
+            self.ram[addr] = bytes(data_out)
+            return b""
+        if cmd in mflr_cmds:
+            if self.mode != "mflr":
+                raise R.Refused("command failed (status 2)")
+            if cmd == R.CMD_MFLR_IDENTIFY:
+                return self.reply(cmd, b"MFLR2.3\0" + struct.pack(">I", self.mflr_at) + b"\0\xF0")
+            if cmd == R.CMD_MFLR_CRC32:
+                addr, n = struct.unpack(">II", a[:8])
+                self.crcs += 1
+                return self.reply(cmd, struct.pack(">I", zlib.crc32(bytes(self.flash[addr:addr + n]))))
+            if cmd == R.CMD_MFLR_UNIQUE_ID:
+                return self.reply(cmd, bytes.fromhex("0123456789abcdef"))
+            if cmd == R.CMD_MFLR_LAST_ERROR:
+                e, self.last_error = self.last_error, 0
+                return self.reply(cmd, bytes([e]))
+            if cmd == R.CMD_USB_BUFFER_SIZE:
+                return self.reply(cmd, struct.pack(">I", 4096))
+            if cmd == R.CMD_MFLR_DISPLAY_TEXT:
+                self.shown.append(bytes(data_out).decode().strip())
+                return b""
+            return self.reply(cmd)
+        if self.mode == "mflr":
+            if cmd == R.CMD_READ_FLASH and not self.has_flash:
+                self.last_error = R.MFLR_OUT_OF_RANGE
+                raise R.Refused("command failed (status 2)")
+            mode, self.mode = self.mode, "loader"
+            try:
+                return super().xfer(cdb, data_out, n_in, timeout)
+            finally:
+                self.mode = mode
+        return super().xfer(cdb, data_out, n_in, timeout)
+
+
+image, now = flashes()
+dev = FakeMflr(now)
+up = R.Uboot(dev)
+steps = []
+ok(R.rescue(up, image, MFLR, True, tmp, say=lambda *a, **k: None, step=lambda k, v=None: steps.append((k, v)))
+   and bytes(dev.flash) == image + now[R.APP_END:], "MFLR: rescued through M-Flasher's loader")
+ok(dev.jumps == [0x01C20000] and up.mflr == "2.3" and up.read_io == 16384 and up.write_io == 4096,
+   "MFLR: started in RAM A, scrambled block by block; large reads")
+ok(dev.crcs >= 1 + 4, "MFLR: the chip's CRC32 checks the reads and each written sector")
+info = [v for k, v in steps if k == "hardware"][0]
+backup = [v for k, v in steps if k == "backup"][0]
+meta = json.loads(Path(backup + ".json").read_text())
+ok(meta["hardware"]["unique_id"] == "0123456789abcdef" and meta["chip_crc32_checked"]
+   and meta["hardware"]["bootloader_text"] == "M-VAVE's (stock)", "MFLR: the flash's unique ID and the analysis saved")
+ok(any("DO NOT SWITCH OFF" in t for t in dev.shown) and any("DONE - VERIFIED" in t for t in dev.shown),
+   "MFLR: the FM-1's own screen says what happens")
+ana = [v for k, v in steps if k == "analysis"]
+ok(ana and len(ana[0]["map"]) == 256 and ana[0]["map"][0] == "boot", "MFLR: the flash map for the window")
+dev = FakeMflr(now, running=0x01C20000)
+up = R.Uboot(dev)
+up.start_loader(MFLR)
+ok(dev.jumps == [] and up.mflr == "2.3", "MFLR: a loader of ours that runs is used again")
+dev = FakeMflr(now, running="jieli")
+try:
+    R.Uboot(dev).start_loader(MFLR)
+    ok(False, "MFLR: refused while JieLi's loader runs")
+except R.Fail as e:
+    ok("another flash loader" in str(e) and not dev.jumps, "MFLR: refused while JieLi's loader runs")
+dev = FakeMflr(now, has_flash=False)
+try:
+    R.Uboot(dev).start_loader(MFLR)
+    ok(False, "MFLR: a loader that found no flash: refused")
+except R.Fail as e:
+    ok("did not identify itself" in str(e) and dev.jumps == [0x01C20000, 0x01C28000],
+       "MFLR: no flash found: started again in RAM B once, then refused")
+dev = FakeMflr(now)
+up = R.Uboot(dev)
+up.start_loader(MFLR)
+plain_read = up.read
+up.read = lambda addr, n: (lambda d: d[:0x50000] + bytes([d[0x50000] ^ 1]) + d[0x50001:])(plain_read(addr, n))
+reads = []
+try:
+    R.inspect_backup(up, MFLR, tmp, say=lambda *a, **k: None, step=lambda *a: reads.append(a))
+    ok(False, "MFLR: reads that disagree with the chip's CRC32: refused")
+except R.Fail as e:
+    ok("chip's own checksum" in str(e), "MFLR: reads that disagree with the chip's CRC32: refused")
+
+# ---- FM-1 016: a longer image (to 0xA9000), M-VAVE's download either V15 or 016
+long_img = bytearray(random.Random(16).randbytes(R.APP_MAX))
+long_img[:R.WRITE_MIN] = boot_area()
+app_head(long_img)
+dev = FakeMflr(now)
+ok(R.rescue(R.Uboot(dev), bytes(long_img), MFLR, True, tmp, say=lambda *a, **k: None)
+   and bytes(dev.flash) == now[:R.WRITE_MIN] + bytes(long_img[R.WRITE_MIN:]) + now[R.APP_MAX:]
+   and max(dev.erased) < R.APP_MAX, "016: written up to 0xA9000, nothing after it")
+up = R.Uboot(FakeMflr(now))
+up.app_end = R.APP_MAX + 0x1000
+try:
+    up.start_loader(MFLR)
+    up.write_sector(R.APP_MAX, bytes(R.SECTOR))
+    ok(False, "016: never past 0xA9000, whatever the image")
+except R.Fail as e:
+    ok("refusing to write" in str(e), "016: never past 0xA9000, whatever the image")
+pkg016 = make_fwsc(bytes(long_img), "FM-1_016")
+with patch.object(R, "STOCK_FM1", {R.STOCK_SHA256: "V15", R.sha256(pkg016): "016"}), \
+        patch.object(R, "fetch", lambda url, timeout=60: pkg016):
+    d = tempfile.mkdtemp(prefix="fm1-016-")
+    p016 = R.download_stock(d, say=lambda *a, **k: None)
+    img, kind, product = R.load_package(p016)
+    ok(os.path.basename(p016) == "FM-1-016.fwsc" and kind == "v15" and product == "FM-1_016"
+       and img == bytes(long_img) and R.find_stock([d]) == p016,
+       "016: M-VAVE's download taken as 016, its whole image")
+with patch.object(R, "fetch", lambda url, timeout=60: b"something else" * 300):
+    try:
+        R.download_stock(tempfile.mkdtemp(), say=lambda *a, **k: None)
+        ok(False, "M-VAVE's download: anything else is refused")
+    except R.Fail as e:
+        ok("neither V15 nor 016" in str(e), "M-VAVE's download: anything else is refused")
+layouts = []
+v016 = bytearray(long_img)
+dev = FakeMflr(now)
+with patch.object(R.FL, "layout", lambda f, key=0x980F: "016" if f[R.APP_END + 5] == v016[R.APP_END + 5] else "015"):
+    R.rescue(R.Uboot(dev), bytes(v016), MFLR, False, tmp, say=lambda *a, **k: None,
+             step=lambda k, v=None: layouts.append((k, v)))
+ok(("layout", {"from": "015", "to": "016"}) in layouts, "015 to 016: the other data layout is pointed out")
+
+# the command line takes M-Flasher's loader by default over USB, JieLi's when asked
+for kind_args, want in (([], "mflr"), (["--loader-kind", "jieli"], "jieli")):
+    used = []
+    dev = FakeMflr(now)
+    with patch.object(R, "get_mflr", side_effect=lambda *a, **k: used.append("mflr") or MFLR), \
+         patch.object(R, "get_loader", side_effect=lambda *a, **k: used.append("jieli") or LOADER), \
+         patch.object(R, "is_admin", return_value=True), patch.object(R.sys, "platform", "win32"), \
+         patch.object(R, "open_device", return_value=dev):
+        code = R.main(["--inspect", "--backup-dir", tmp, "--tries", "1", *kind_args])
+    ok(code == 0 and used == [want], f"CLI: {want} loader {'by default' if not kind_args else 'when asked'}")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

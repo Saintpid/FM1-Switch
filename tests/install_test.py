@@ -244,6 +244,19 @@ def installs():
     rc, out, err = cli(["--info"], dev)
     ok(rc == 0 and "update loader" in out, "--info: device in update mode")
 
+    dev = FakeFM1(image, identity="FM-1_872", name="FM-1")
+    rc, out, err = cli(["--update-mode"], dev)
+    ok(rc == 0 and dev.sent[-1] == bytes([0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7]) and dev.upgrades == 0
+       and "FM-1_872" in out and all(l.closed for l in dev.links),
+       "--update-mode: the soft key to the FM-1 that answers, nothing else")
+    rc, out, err = cli(["--update-mode"], FakeFM1(image, name="IAC Driver Bus 1"))
+    ok(rc == 3, "--update-mode: no FM-1 -> exit 3")
+    try:
+        rc = cli(["--update-mode", "--info"], FakeFM1(image))[0]
+    except SystemExit as e:
+        rc = e.code
+    ok(rc == 2, "--update-mode with --info: a usage error")
+
 
 def errors():
     raw = package()

@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PREFIX = "FM1Switch/"
 FILES = ["VERSION", "LICENSE", "DISCLAIMER.md", "README.md", "CHANGELOG.md", "requirements.txt",
          "FM1SWITCH_BUILD_FLOW.txt", "build_fm1_mac.sh", "builder-flows.json", "installer/EULA.txt",
-         "tools/fm1_switch.pyw", "tools/fm1_install.py", "tools/fm1_rescue.py",
-         "tests/install_test.py", "tests/switch_test.py", "tests/rescue_test.py"]
+         "tools/fm1_switch.pyw", "tools/fm1_install.py", "tools/fm1_rescue.py", "tools/fm1_flash.py",
+         "third_party/NOTICE.md",
+         "tests/install_test.py", "tests/switch_test.py", "tests/rescue_test.py", "tests/flash_test.py", "tests/fm1_fixture.py"]
 TREES = ["mac/"]
 EXECUTABLE = (".sh", ".command")
 SHELL = (".sh", ".command")

@@ -32,6 +32,9 @@ import time
 
 HS_QUERY = bytes([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])
 UPGRADE = bytes([0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7])
+# the soft key: M-VAVE's firmware (015, 016), Felucca and its family (Wild, NB303...) restart into the
+# chip's own update mode (UBOOT) on it (M-Flasher's docs/development.md; Wild's usb.c)
+SOFT_KEY = bytes([0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7])
 FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
 MAXDATA = 512
 BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
@@ -440,6 +443,21 @@ class Updater:
 
 # ------------------------------------------------------------------- CLI ---
 
+def enter_update_mode(up):
+    """send the soft key to the FM-1 that answers on MIDI -> its identity text. It restarts into the
+    chip's update mode, where fm1_rescue takes it; nothing is written by this"""
+    dev = up.find()
+    if not dev:
+        raise not_found(up)
+    try:
+        if not dev.link.send(SOFT_KEY):
+            raise InstallError("lost", "the FM-1 stopped answering before the soft key could be sent")
+        time.sleep(DELAY["open"])
+    finally:
+        dev.link.close()
+    return dev.id.text
+
+
 def load_package(path, force):
     try:
         raw = open(path, "rb").read()
@@ -488,6 +506,10 @@ class Progress:
 
 def run(a, backend, out, ask):
     up = Updater(backend, a.port)
+    if a.update_mode:
+        text = enter_update_mode(up)
+        print(f"{text}: sent to the chip's update mode (it shows up on USB as a disk, WL82 UBOOT)", file=out)
+        return 0
     if a.info:
         dev = up.find()
         if not dev:
@@ -526,12 +548,14 @@ def main(argv=None, backend=None, out=sys.stdout, ask=ask_tty):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("package", nargs="?", help="Felucca package (.fwsc)")
     ap.add_argument("--info", action="store_true", help="print the identity of the connected FM-1")
+    ap.add_argument("--update-mode", action="store_true",
+                    help="restart the connected FM-1 into the chip's own update mode (for fm1_rescue); writes nothing")
     ap.add_argument("--port", metavar="NAME", help="MIDI port to use (part of its name)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     ap.add_argument("--force", action="store_true", help="install a package without the Felucca loader marker")
     a = ap.parse_args(argv)
-    if bool(a.info) == bool(a.package):
-        ap.error("give a PACKAGE.fwsc or --info")
+    if (bool(a.info) + bool(a.update_mode) + bool(a.package)) != 1:
+        ap.error("give a PACKAGE.fwsc, --info or --update-mode")
     try:
         if backend is None:
             try:

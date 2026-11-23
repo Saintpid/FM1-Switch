@@ -181,6 +181,10 @@ ok("UCUN" in S.install_error_text(err) and "does not identify" in S.install_erro
    "update diagnosis: possible UCUN incompatibility, no inferred chip ID")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
    and a[a.index("--backup-dir") + 1] == str(rd), "rescue: V15, --write, the backup folder, the progress file")
+t = S.rescue_args("v.fwsc", rd, "p", via="transporter")
+ok(a[a.index("--mflr-dir") + 1] == str(rd) and "--loader" not in a
+   and t[t.index("--loader") + 1] == str(rd / S.R.LOADER_NAME) and "--mflr-dir" not in t,
+   "rescue: M-Flasher's loader over USB, JieLi's through the adapter")
 cmd = S.helper_command(a, "win32")
 ok(cmd[0] == sys.executable and cmd[1].endswith("fm1_switch.pyw") and cmd[2] == "--rescue" and cmd[3:] == a,
    "rescue: this program again, with --rescue")
