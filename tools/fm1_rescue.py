@@ -253,6 +253,7 @@ class Uboot:
         self.app_end = APP_END                               # write_sector's upper bound (the package's end)
         self.boot_write = False                              # write_boot_sector: protect() only, once checked
         self.full_write = False                              # write_any_sector: restore() only, once checked
+        self.wrote = False                                   # a sector erased: no automatic second attempt
 
     def inquiry(self):
         r = self.bot.xfer(bytes([0x12, 0, 0, 0, 36, 0]), n_in=36)
@@ -422,6 +423,7 @@ class Uboot:
         self._program(addr, data)
 
     def _program(self, addr, data):
+        self.wrote = True
         self.cmd(CMD_ERASE_SECTOR, struct.pack(">I", addr))
         for off in range(0, SECTOR, self.write_io):
             chunk = data[off:off + self.write_io]
@@ -463,6 +465,7 @@ class MflrLoader:
 IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x4D014
 IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400
 IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x560000
+WIN_SETTLE = 1.5                                             # seconds after the UBOOT disk appears
 CFA_HINT = (". Windows Security's Controlled folder access may be blocking FM-1 Switch from the FM-1's "
             "update-mode disk: Windows Security > Virus & threat protection > Manage ransomware protection > "
             "Allow an app through Controlled folder access > Add an allowed app > FM1-Switch.exe (in "
@@ -630,8 +633,11 @@ class WinScsi:
         s.sptd.DataBuffer = C.addressof(buf)
         s.sptd.SenseInfoOffset = SPTDS.sense.offset
         C.memmove(s.sptd.Cdb, bytes(cdb), len(cdb))
-        self.win.ioctl(self.h, IOCTL_SCSI_PASS_THROUGH_DIRECT, C.addressof(s), C.sizeof(s),
-                       C.addressof(s), C.sizeof(s))
+        try:
+            self.win.ioctl(self.h, IOCTL_SCSI_PASS_THROUGH_DIRECT, C.addressof(s), C.sizeof(s),
+                           C.addressof(s), C.sizeof(s))
+        except Fail as e:
+            raise Fail(f"{e} (command {bytes(cdb[:2]).hex()})") from None
         if s.sptd.ScsiStatus != 0:
             raise Refused(f"command failed (status {s.sptd.ScsiStatus})")
         return buf.raw[:n] if n_in else b""
@@ -1539,12 +1545,16 @@ def open_device(timeout, say=print, stop=None):
                 raise Fail("multiple UBOOT devices found: connect only the target device; nothing written")
             if disks:
                 say(f"found it after {time.time() - t0:.1f} s ({disks[0]})")
+                time.sleep(WIN_SETTLE)                       # (Windows is still setting the new disk up)
                 try:
                     t = WinScsi(disks[0], say=say)
-                    try:
-                        Uboot(t).inquiry()
-                    except Fail:
-                        pass
+                    for _ in range(3):                       # until it answers steadily
+                        try:
+                            Uboot(t).inquiry()
+                            break
+                        except Fail as e:
+                            say(f"  not answering yet ({e})")
+                            time.sleep(0.5)
                     return t
                 except Fail as e:
                     say(f"  could not open it ({e}); waiting for the next cycle")
@@ -1635,6 +1645,10 @@ class ProgressFile:
             except OSError:
                 words = []
             if words[:1] == ["go"]:
+                try:
+                    os.remove(self.path + ".go")             # one answer, one question: a retry asks again
+                except OSError:
+                    pass
                 return "ucun" if "ucun" in words[1:] else True
             time.sleep(poll)
         return False
@@ -1811,6 +1825,9 @@ def main(argv=None):
                 raise
             except Exception as e:                           # (a USB error: it dropped out)
                 say(f"  attempt {attempt}: {e}")
+                if (args.protect or args.restore) and getattr(dev, "wrote", False):
+                    raise Fail(f"{e}; writing had begun, so it is not tried again by itself: keep the FM-1 "
+                               "connected and switched on, and run it again (or put the backup back)")
                 if attempt < args.tries:
                     time.sleep(1.5)                          # (Windows may still be setting the disk up)
                 if isinstance(e, Fail) and ("not writing" in str(e) or "not the FM-1" in str(e)
@@ -1818,7 +1835,7 @@ def main(argv=None):
                     raise
             finally:
                 release(t)
-        raise Fail("gave up after several attempts; send this whole output")
+        raise Fail(f"gave up after {args.tries} attempt{'s' if args.tries > 1 else ''}; send this whole output")
     except Fail as e:
         if pf:
             pf.put(end="fail", error=str(e))

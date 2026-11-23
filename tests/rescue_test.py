@@ -1163,5 +1163,31 @@ ok(R.Uboot(R.WinScsi(r"\\.\PhysicalDrive2", FakeWin32(FakeUboot(base)))).inquiry
 ok("Controlled folder access" in R.CFA_HINT and "FM1-Switch.exe" in R.CFA_HINT,
    "Windows: error 5 tells how to allow the app through Controlled folder access")
 
+pfp2 = str(Path(tmp) / "answer2.jsonl")
+pf2 = R.ProgressFile(pfp2)
+R.answer(pfp2)
+ok(pf2.answer(poll=0) is True and not os.path.exists(pfp2 + ".go"), "answer: one yes answers one question")
+# a write that has begun is never tried again by itself
+dev2 = FakeMflr(bytes(changed))
+real5 = R.Uboot._program
+
+
+def _drop(self, a, data):
+    real5(self, a, data)
+    if a >= 0x50000:
+        raise OSError("USB gone")
+
+
+bf2 = Path(tempfile.mkdtemp()) / "fm1-backup-y.bin"
+bf2.write_bytes(saved)
+Path(str(bf2) + ".sha256").write_text(R.sha256(saved) + "  x\n")
+opened = []
+with patch.object(R, "get_mflr", return_value=MFLR), patch.object(R, "is_admin", return_value=True), \
+        patch.object(R, "open_device", side_effect=lambda *a, **k: opened.append(1) or dev2), \
+        patch.object(R.Uboot, "_program", _drop), patch.object(R, "release"), patch("time.sleep"), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}):
+    code = R.main(["--restore", str(bf2), "--write", "--tries", "5", "--backup-dir", tmp])
+ok(code == 1 and len(opened) == 1, "restore: once writing has begun, it is not tried again by itself")
+
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

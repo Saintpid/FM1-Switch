@@ -317,7 +317,7 @@ ok("OberVave, by zvenson" in S.hardware_text({**hw_info, "firmware_hub": ["oberv
 # ------------------------------------------------------- protect my FM-1 ---
 pa = S.protect_args(rd, "/tmp/p.jsonl")
 ok(pa[:2] == ["--protect", "--ask"] and "--write" not in pa and pa[pa.index("--progress") + 1] == "/tmp/p.jsonl"
-   and pa[pa.index("--mflr-dir") + 1] == str(rd) and pa[pa.index("--tries") + 1] == "1"
+   and pa[pa.index("--mflr-dir") + 1] == str(rd) and pa[pa.index("--tries") + 1] == "3"
    and "--allow-ucun-write" not in pa and "--via" not in pa,
    "protect: the helper asks the window before it writes, over USB, UCUN only by the answer")
 ok(S.chip_text({"jedec_id": "856014"}).startswith("the first") and "UCUN" in S.chip_text({"jedec_id": "b36014"})

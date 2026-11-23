@@ -619,7 +619,7 @@ def protect_args(d, progress, mode="protect", backup=None):
     and only then writes"""
     what = ["--protect"] if mode == "protect" else ["--restore", str(backup)] + (["--boot-only"] if mode == "stock" else [])
     a = what + ["--ask", "--backup-dir", str(d), "--mflr-dir", str(d),
-                "--wait", "300", "--tries", "1", "--progress", str(progress)]
+                "--wait", "300", "--tries", "3", "--progress", str(progress)]
     if hasattr(os, "getuid"):
         a += ["--owner", f"{os.getuid()}:{os.getgid()}"]
     return a
