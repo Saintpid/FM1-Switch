@@ -24,8 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import fm1_rescue as R  # noqa: E402
+import fm1_flash as FL  # noqa: E402
 sys.path.insert(0, str(ROOT / "tests"))
-from fm1_fixture import boot_area, open_boot  # noqa: E402
+from fm1_fixture import boot_area, open_boot, unit_flash  # noqa: E402
 
 failed = 0
 
@@ -867,6 +868,122 @@ for kind_args, want in (([], "mflr"), (["--loader-kind", "jieli"], "jieli")):
          patch.object(R, "open_device", return_value=dev):
         code = R.main(["--inspect", "--backup-dir", tmp, "--tries", "1", *kind_args])
     ok(code == 0 and used == [want], f"CLI: {want} loader {'by default' if not kind_args else 'when asked'}")
+
+# ---- Protect my FM-1: the rescue bootloader in the boot area, nothing else changed
+MB = open_boot(R.MBOOT_VERSION)
+quiet = lambda *a, **k: None                                              # noqa: E731
+
+
+def protect_on(flash, write=True, **kw):
+    d = FakeMflr(flash, **{k: kw.pop(k) for k in ("fid",) if k in kw})
+    up = R.Uboot(d)
+    st = []
+    try:
+        r = R.protect(up, kw.pop("boot", MB), MFLR, write, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)), **kw)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+_, base = flashes()
+r, d, up, st = protect_on(base)
+new = bytes(d.flash)
+ok(r == "installed" and new[R.WRITE_MIN:] == base[R.WRITE_MIN:], "protect: installed, nothing outside the boot area changed")
+ok(FL.bootloader_info(new)[0] == "open" and FL.bootloader_info(new)[2] == R.MBOOT_VERSION
+   and FL.check_boot_area(new) is None, "protect: m-bootloader stored, and the boot area can start the FM-1")
+ok(new[FL.CONFIG_AT:FL.CONFIG_AT + FL.CONFIG_KEY] == base[0x38D0:0x38D0 + FL.CONFIG_KEY],
+   "protect: the FM-1's own chip-key record kept")
+ok(d.erased and all(a < R.WRITE_MIN for a in d.erased) and d.erased[-1] == 0 and d.ran,
+   "protect: only boot sectors erased, the header's last, then restarted")
+plan_ = [v for k, v in st if k == "plan"][0]
+ok([k for k, _ in st][-1] == "done" and any(k == "backup" for k, _ in st) and set(plan_["sectors"]) <= {0, 0x1000, 0x2000, 0x3000}
+   and len(plan_["map"]) == 256, "protect: backup first, a plan with the sectors and the map, then done")
+ok(up.boot_write is False, "protect: the boot-area permission is closed again")
+r, d, _, st = protect_on(new)
+ok(r == "already" and not d.erased and ("already", R.MBOOT_VERSION) in st, "protect: already protected, nothing written")
+r, d, _, st = protect_on(base, write=False)
+ok(r is False and not d.erased and any(k == "plan" for k, _ in st), "protect: without --write it checks and writes nothing")
+older = R.protect(R.Uboot(FakeMflr(new)), open_boot("2.5-new"), MFLR, True, tmp, say=quiet)
+ok(older == "installed", "protect: another rescue bootloader version is replaced")
+broken = bytearray(base)
+broken[:R.WRITE_MIN] = unit_flash(key_ok=False)[:R.WRITE_MIN]
+r, d, _, _ = protect_on(bytes(broken))
+ok(isinstance(r, R.Fail) and "chip-key" in str(r) and not d.erased, "protect: a damaged chip-key record is refused")
+r, d, _, _ = protect_on(base, boot=open_boot("2.4-x", board="smk37"))
+ok(isinstance(r, R.Fail) and "FM-1" in str(r) and not d.erased, "protect: another board's build is refused")
+r, d, _, _ = protect_on(base, boot=open_boot("2.4-x", size=0x3F80))
+ok(isinstance(r, R.Fail) and not d.erased, "protect: a bootloader that does not fit is refused")
+kb = bytearray(base)
+kb[R.TRIM_AT:R.TRIM_AT + len(R.TRIM_MARK)] = R.TRIM_MARK
+r, d, _, _ = protect_on(bytes(kb))
+ok(isinstance(r, R.Fail) and "keyboard" in str(r) and not d.erased, "protect: an SMK-37 is refused")
+r, d, _, _ = protect_on(base, fid=R.UCUN_FLASH)
+ok(isinstance(r, R.Fail) and "UCUN" in str(r) and not d.erased, "protect: UCUN needs its explicit opt-in")
+r, d, _, _ = protect_on(base, fid=R.UCUN_FLASH, allow_ucun=True)
+ok(r == "installed", "protect: and installs with it")
+try:
+    R.protect(R.Uboot(FakeMflr(base, fid=R.UCUN_FLASH)), MB, MFLR, False, tmp, say=quiet, confirm=lambda: True)
+    ok(False, "protect: a plain yes does not allow the UCUN flash")
+except R.Fail as e:
+    ok("UCUN" in str(e), "protect: a plain yes does not allow the UCUN flash")
+ok(R.protect(R.Uboot(FakeMflr(base, fid=R.UCUN_FLASH)), MB, MFLR, False, tmp, say=quiet, confirm=lambda: "ucun")
+   == "installed", "protect: the window's yes with UCUN allowed installs it")
+pfp = str(Path(tmp) / "answer.jsonl")
+pf = R.ProgressFile(pfp)
+R.answer(pfp)
+ok(pf.answer(poll=0) is True, "protect: the window's answer file: go")
+R.answer(pfp, ucun=True)
+ok(pf.answer(poll=0) == "ucun", "protect: go ucun")
+open(pfp + ".stop", "w").close()
+ok(pf.answer(poll=0) is False, "protect: stop wins")
+up2 = R.Uboot(FakeMflr(base))
+try:
+    up2.write_boot_sector(0, bytes(R.SECTOR))
+    ok(False, "protect: no boot-area write outside protect()")
+except R.Fail:
+    ok(True, "protect: no boot-area write outside protect()")
+try:
+    up2.write_sector(0x3000, bytes(R.SECTOR))
+    ok(False, "rescue: still never below 0x4000")
+except R.Fail:
+    ok(True, "rescue: still never below 0x4000")
+d = FakeMflr(base)
+up3 = R.Uboot(d)
+real = up3._program
+up3._program = lambda a, data: (_ for _ in ()).throw(R.Fail("sector did not verify")) if a == 0 else real(a, data)
+try:
+    R.protect(up3, MB, MFLR, True, tmp, say=quiet)
+    ok(False, "protect: a sector that will not verify stops it, the permission closed")
+except R.Fail as e:
+    ok("restore the backup" in str(e) and up3.boot_write is False, "protect: a sector that will not verify stops it, the permission closed")
+with patch.object(R, "fetch", return_value=b"not it"):
+    try:
+        R.get_mbootloader(None, quiet)
+        ok(False, "protect: a download that is not m-bootloader 2.4 is refused")
+    except R.Fail:
+        ok(True, "protect: a download that is not m-bootloader 2.4 is refused")
+cache = tempfile.mkdtemp()
+with patch.object(R, "fetch", return_value=MB), patch.object(R, "MBOOT_SHA256", R.sha256(MB)):
+    got = R.get_mbootloader(cache, quiet)
+    with patch.object(R, "fetch", side_effect=AssertionError("fetched twice")):
+        ok(got == MB and R.get_mbootloader(cache, quiet) == MB, "protect: the checked download is kept and reused")
+for bad in (["--protect", "fixture.fwsc"], ["--protect", "--inspect"], ["--protect", "--via", "transporter"]):
+    try:
+        with patch("sys.stderr"):
+            R.main(bad)
+        ok(False, "protect: " + " ".join(bad) + " is refused")
+    except SystemExit as e:
+        ok(e.code == 2, "protect: " + " ".join(bad) + " is refused")
+prog = str(Path(tmp) / "protect.jsonl")
+with patch.object(R, "get_mbootloader", return_value=MB), patch.object(R, "get_mflr", return_value=MFLR), \
+        patch.object(R, "is_admin", return_value=True), patch.object(R, "open_device", return_value=FakeMflr(base)), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}), \
+        patch.object(R, "release"):
+    code = R.main(["--protect", "--write", "--backup-dir", tmp, "--progress", prog])
+ev, _ = R.read_progress(prog)
+end = [e for e in ev if "end" in e]
+ok(code == 0 and end and end[-1]["operation"] == "protect" and end[-1]["result"] == "installed",
+   "protect: the command line installs it and reports so")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

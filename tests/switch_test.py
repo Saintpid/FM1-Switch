@@ -62,7 +62,7 @@ try:
     S.install(T.FakeFM1(b""), allpk[0], lambda *a: None)
     ok(False, "Install: a package without the loader is refused (Rescue's)")
 except I.InstallError as e:
-    ok(e.code == "badpkg" and "Rescue" in str(e), "Install: a package without the loader is refused (Rescue's)")
+    ok(e.code == "badpkg" and "Through update mode" in str(e), "Install: a package without the loader is refused (Rescue's)")
 ch = S.rescue_choices(folders)
 ok(ch[0] is None and [p.product for p in ch[1:]] == ["FM-1_999", "FM-1_900", "FM-1_846"],
    "rescue choices: V15 first (to download when not found), then any FM-1 firmware")
@@ -313,6 +313,47 @@ ok("OberVave, by zvenson" in S.hardware_text({**hw_info, "firmware_hub": ["oberv
    and "thefirmwarehub.com" in S.hardware_text({**hw_info, "firmware_hub": ["obervave"]})
    and "thefirmwarehub.com" not in S.hardware_text({**hw_info, "firmware_hub": []}),
    "window: a firmware named from the hub's list credits it")
+
+# ------------------------------------------------------- protect my FM-1 ---
+pa = S.protect_args(rd, "/tmp/p.jsonl")
+ok(pa[:2] == ["--protect", "--ask"] and "--write" not in pa and pa[pa.index("--progress") + 1] == "/tmp/p.jsonl"
+   and pa[pa.index("--mflr-dir") + 1] == str(rd) and pa[pa.index("--tries") + 1] == "1"
+   and "--allow-ucun-write" not in pa and "--via" not in pa,
+   "protect: the helper asks the window before it writes, over USB, UCUN only by the answer")
+ok(S.chip_text({"jedec_id": "856014"}).startswith("the first") and "UCUN" in S.chip_text({"jedec_id": "b36014"})
+   and S.chip_text({"jedec_id": "123456", "flash_name": "X"}) == "X (123456)", "protect: the flash chip in plain words")
+ft = S.found_text({"jedec_id": "856014"}, {"bootloader_text": "M-VAVE's (stock)", "firmware": "Wild 0.3.43",
+                                           "firmware_status": "ok", "firmware_hub": []})
+ok(ft.count("\n") == 2 and "Wild 0.3.43." in ft and "stock" in ft and "thefirmwarehub" not in ft,
+   "protect: what the backup found")
+ft = S.found_text({"jedec_id": "856014"}, {"firmware": "X", "firmware_status": "damaged",
+                                           "firmware_status_text": "damaged files", "firmware_hub": ["x"]})
+ok("X (damaged files)." in ft and "thefirmwarehub" in ft and S.found_text({"jedec_id": "856014"}, None).count("\n") == 0,
+   "protect: a damaged firmware is said, a hub name credited")
+pt = S.plan_text({"sectors": [0, 0x1000, 0x3000], "firmware_ok": True})
+ok("3 of 256" in pt and "not whole" not in pt and "not whole" in S.plan_text({"sectors": [0], "firmware_ok": False}),
+   "protect: the plan in one sentence")
+lg = S.map_legend(["boot"] * 4 + ["firmware"] * 100 + ["free"] * 150 + ["mac", "boot"])
+ok([x[0] for x in lg] == ["boot", "firmware", "free", "mac"] and lg[0][1] == "Bootloader"
+   and all(c.startswith("#") for _, _, c in lg), "protect: the map's legend, each region once")
+pd = Path(tempfile.mkdtemp(prefix="fm1-protect-"))
+ok(S.protection(pd) is None and S.last_backup(pd) is None, "protect: nothing read yet")
+(pd / "fm1-backup-1.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "stock"}}))
+(pd / "fm1-backup-2.bin.json").write_text("{")
+ok(S.protection(pd) == "not", "protect: a stock bootloader in the last backup: not protected")
+import os as _os  # noqa: E402
+S.mark_protected(pd, "2.4")
+_os.utime(pd / "protected.json", (2e9, 2e9))
+ok(S.protection(pd) == "protected", "protect: after an install, protected")
+(pd / "fm1-backup-3.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "stock"}}))
+_os.utime(pd / "fm1-backup-3.bin.json", (2.1e9, 2.1e9))
+ok(S.protection(pd) == "not", "protect: a later backup with the stock bootloader wins (an M-VAVE update put it back)")
+(pd / "fm1-backup-4.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "open"}}))
+_os.utime(pd / "fm1-backup-4.bin.json", (2.2e9, 2.2e9))
+ok(S.protection(pd) == "protected" and S.last_backup(pd)[0]["bootloader"] == "open",
+   "protect: a backup with m-bootloader in it: protected")
+ok(all(k in S.PROTECTION_TEXT for k in ("protected", "not", None)) and set(S.TASK_TEXT) ==
+   {"protect", "install", "backup", "guide"}, "window: the start screen's four tasks and the protection line")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

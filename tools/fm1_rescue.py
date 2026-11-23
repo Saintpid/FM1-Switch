@@ -25,10 +25,16 @@ on hardware:
   2. the chip key must be 980F and the flash a known FM-1 1 MiB part;
      UCUN writes require explicit experimental opt-in and direct USB;
   3. the whole flash is read and saved as a backup before anything else;
-  4. only 4 KiB sectors in [0x4000, 0x93000) that differ from V15 are written (the bootloader below
-     0x4000 and the device data above 0x93000 are never touched; a difference below 0x4000 stops
-     it), each erased, written and read back;
+  4. only 4 KiB sectors in [0x4000, 0x93000) that differ from V15 are written (0xA9000 for M-VAVE's
+     016; the boot area below 0x4000 and the device data after the image are never touched, and the
+     FM-1's own boot area must be one that can start it), each erased, written and verified;
   5. a final full read must equal the expected image; then the FM-1 restarts into V15.
+
+--protect is the one operation that writes the boot area: it puts the rescue bootloader (m-bootloader,
+downloaded and checked) there, built over the FM-1's own boot area with its chip-key record kept, after
+the same checks and backup, and changes nothing outside those 16 KiB:
+
+  sudo ~/fm1-rescue/bin/python fm1_rescue.py --protect --write
 """
 import argparse
 import hashlib
@@ -38,6 +44,7 @@ import struct
 import sys
 import time
 import tempfile
+import threading
 import urllib.request
 import uuid
 import zlib
@@ -67,6 +74,13 @@ LOADER_ADDR, LOADER_ARG = 0x1C02000, 0x0001
 MFLR_URL = "https://github.com/jvitkauskas/m-bootloader/releases/download/v2.3/"
 MFLR = (("mflr-loader-a.bin", 0x01C20000, "ae0cdf4965cc2438a362e933ccf11d41159322d67f2dc630a61ab84cc58e04d7"),
         ("mflr-loader-b.bin", 0x01C28000, "6f9d97fcd3b16a74dd2b056ebca5e516c56a1c789a4b46b5afdd824d42fd684f"))
+# m-bootloader for the FM-1 (same release family, MIT): the rescue bootloader that "Protect my FM-1"
+# puts in the boot area. Hold REC at power-on: update mode; PLAY: its menu; a damaged firmware is not
+# started. Downloaded and checked like the loaders, never part of this repository.
+MBOOT_URL = "https://github.com/jvitkauskas/m-bootloader/releases/download/v2.4/fm1-uboot.boot"
+MBOOT_NAME = "fm1-uboot.boot"
+MBOOT_SHA256 = "677ae52a11721b1811b2688b45f6f0cfae51882810e0a4f4b409da08ce5b49e4"
+MBOOT_VERSION = "2.4-395e6cc"
 CMD_MFLR_IDENTIFY, CMD_MFLR_CRC32, CMD_MFLR_UNIQUE_ID = 0xFC40, 0xFC41, 0xFC42
 CMD_MFLR_DISPLAY_ON, CMD_MFLR_DISPLAY_TEXT, CMD_MFLR_DISPLAY_BAR, CMD_MFLR_LAST_ERROR = 0xFC43, 0xFC44, 0xFC45, 0xFC46
 CMD_USB_BUFFER_SIZE = 0xFC14
@@ -87,7 +101,7 @@ KEYBOARD = ("this is an M-VAVE SMK-37 keyboard (or an MKE-P37), not an FM-1: Res
             "only, and an FM-1 firmware must never go on the keyboard; nothing written")
 APP_END = 0x93000          # the .fwsc flash entry is raw flash [0, APP_END) (FM-1 015, Felucca-based)
 APP_MAX = 0xA9000          # ... or longer, up to here: FM-1 016's image ends at 0xA9000
-WRITE_MIN = 0x4000         # flash header, SPL, isd_config: never written
+WRITE_MIN = 0x4000         # flash header, SPL, isd_config: never written by the rescue (only by protect())
 SECTOR = 0x1000
 IO = 512
 
@@ -237,6 +251,7 @@ class Uboot:
         self.read_io, self.write_io = IO, IO
         self.screen_on = False
         self.app_end = APP_END                               # write_sector's upper bound (the package's end)
+        self.boot_write = False                              # write_boot_sector: protect() only, once checked
 
     def inquiry(self):
         r = self.bot.xfer(bytes([0x12, 0, 0, 0, 36, 0]), n_in=36)
@@ -389,6 +404,15 @@ class Uboot:
     def write_sector(self, addr, data):
         if addr < WRITE_MIN or addr >= min(self.app_end, APP_MAX) or addr % SECTOR or len(data) != SECTOR:
             raise Fail(f"refusing to write {addr:#x}")
+        self._program(addr, data)
+
+    def write_boot_sector(self, addr, data):
+        """one of the boot area's four sectors: only after protect() has checked the area it belongs to"""
+        if not self.boot_write or addr >= WRITE_MIN or addr % SECTOR or len(data) != SECTOR:
+            raise Fail(f"refusing to write {addr:#x}")
+        self._program(addr, data)
+
+    def _program(self, addr, data):
         self.cmd(CMD_ERASE_SECTOR, struct.pack(">I", addr))
         for off in range(0, SECTOR, self.write_io):
             chunk = data[off:off + self.write_io]
@@ -930,6 +954,83 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
     return True
 
 
+def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
+            allow_ucun=False):
+    """Protect my FM-1: m-bootloader in the boot area. A full verified backup first; the new boot area is
+    built over the FM-1's own (its chip-key record kept), must pass the bootable check, and nothing outside
+    the 16 KiB boot area may change. -> "installed", "already" or False (checked, nothing written)"""
+    step = step or (lambda *a: None)
+    ident = FL.bootloader_identity(boot)
+    if ident is None or ident[0] != "fm1":
+        raise Fail("this is not m-bootloader's build for the FM-1; nothing written")
+    version = ident[1]
+    if not isinstance(dev, Uboot):
+        raise Fail("the rescue bootloader is installed over direct USB only; nothing written")
+    now, info, _ = inspect_backup(dev, loader, backup_dir, say, step, owner)
+    kind, text, have = FL.bootloader_info(now)
+    if kind == "open" and have == version and FL.stored_bootloader(now) == boot:
+        say(f"  the FM-1 already has the rescue bootloader ({text}); nothing to write. Restarting it ...")
+        dev.run_app()
+        step("already", version)
+        return "already"
+    try:
+        area = FL.boot_area_for(now, boot)
+        new = area + now[WRITE_MIN:]
+        FL.check_boot_area(new)
+    except FL.FormatError as e:
+        raise Fail(f"the new boot area would not work ({e}); nothing written")
+    if new[WRITE_MIN:] != now[WRITE_MIN:] or len(new) != FLASH_SIZE:
+        raise Fail("the new boot area would change more than the boot area; nothing written")
+    diff = [a for a in range(0, WRITE_MIN, SECTOR) if new[a:a + SECTOR] != now[a:a + SECTOR]]
+    say(f"  rescue bootloader {version} over {text}: {len(diff)} of 4 boot sectors change; "
+        "the firmware and its data stay")
+    if info["firmware_status"] != FL.APP_OK:
+        say("  note: the firmware on the FM-1 is not whole: the rescue bootloader will not start it, it "
+            "waits for a new one (hold REC at power-on for update mode)")
+    step("plan", {"from": text, "to": version, "sectors": diff,
+                  "map": FL.sector_map(new), "firmware_ok": info["firmware_status"] == FL.APP_OK})
+    if not write and confirm is not None:
+        write = keep_alive(dev, confirm)
+        allow_ucun = allow_ucun or write == "ucun"
+    if not write:
+        say("  check passed. Nothing written: run again with --write to install it.")
+        return False
+    if info["experimental"] and not allow_ucun:
+        raise Fail("UCUN UC25HQ80 detected. Backup verified; nothing written. Writing on this chip is "
+                   "experimental: allow it explicitly (--allow-ucun-write in the CLI).")
+    dev.show(3, " PROTECT FM-1")
+    dev.show(5, " WRITING BOOT AREA")
+    dev.show(12, " DO NOT SWITCH OFF", SCREEN_AMBER)
+    dev.boot_write = True
+    try:
+        # the sector with the flash header and the file table last: until then the old table is whole
+        for i, a in enumerate(sorted(diff, reverse=True)):
+            for attempt in range(3):
+                try:
+                    dev.write_boot_sector(a, new[a:a + SECTOR])
+                    break
+                except Fail as e:
+                    if attempt == 2:
+                        raise Fail(f"{e}; the FM-1 is still in update mode: keep it connected and restore "
+                                   "the backup (or run this again)")
+            step("write", (i + 1) * 100 // len(diff))
+            dev.show(bar=(i + 1) * 100 // len(diff), color=SCREEN_MINT)
+    finally:
+        dev.boot_write = False
+    say("  final read ...")
+    final = dev.read(0, FLASH_SIZE)
+    if final != new or dev.crc32(0, FLASH_SIZE) not in (None, crc32(new)):
+        bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != new[a:a + SECTOR]]
+        raise Fail("final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad)
+                   + "; the FM-1 is still in update mode: restore the backup")
+    dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
+    dev.show(12, " RESTARTING")
+    say(f"  the rescue bootloader {version} is installed and verified. Restarting the FM-1 ...")
+    dev.run_app()
+    step("done", version)
+    return "installed"
+
+
 def keep_alive(dev, confirm):
     """Ask while the loader is kept busy (it resets the chip after ~3 s without a command)."""
     import threading
@@ -1013,6 +1114,26 @@ def get_mflr(cache_dir=None, say=print, folder=None):
                     pass
         slots.append((name, addr, blob))
     return MflrLoader(slots)
+
+
+def get_mbootloader(cache_dir=None, say=print):
+    """m-bootloader's FM-1 build (v2.4): a checked copy in cache_dir, or downloaded (and kept there)"""
+    p = os.path.join(cache_dir, MBOOT_NAME) if cache_dir else None
+    if p and os.path.isfile(p):
+        b = open(p, "rb").read()
+        if sha256(b) == MBOOT_SHA256:
+            return b
+    say(f"downloading the rescue bootloader (m-bootloader {MBOOT_VERSION}) ...")
+    b = fetch(MBOOT_URL, 30)
+    if sha256(b) != MBOOT_SHA256:
+        raise Fail(f"{MBOOT_NAME}: unexpected contents")
+    if p:
+        try:
+            with open(p, "wb") as f:
+                f.write(b)
+        except OSError:
+            pass
+    return b
 
 
 def loader_sha256(loader):
@@ -1252,10 +1373,10 @@ def release(t):
         pass
 
 
-def ask():
+def ask(what="put the stock firmware back"):
     print("\n  Everything checks out, and the backup is saved.")
     try:
-        return input("  Type yes and press Return to put the stock firmware back: ").strip().lower() == "yes"
+        return input(f"  Type yes and press Return to {what}: ").strip().lower() == "yes"
     except EOFError:
         return False
 
@@ -1283,6 +1404,29 @@ class ProgressFile:
 
     def stopped(self):
         return os.path.exists(self.path + ".stop")
+
+    def answer(self, poll=0.2, stop=None):
+        """the window's answer to the question the run waits on: FILE.go holds "go" or "go ucun"
+        (write; the second also allows the UCUN flash), FILE.stop: no. -> True, "ucun" or False"""
+        stop = stop or threading.Event()
+        while not stop.is_set():
+            if self.stopped():
+                return False
+            try:
+                with open(self.path + ".go", encoding="ascii") as f:
+                    words = f.read().split()
+            except OSError:
+                words = []
+            if words[:1] == ["go"]:
+                return "ucun" if "ucun" in words[1:] else True
+            time.sleep(poll)
+        return False
+
+
+def answer(path, ucun=False):
+    """the window says yes to a run waiting on FILE.go (see ProgressFile.answer)"""
+    with open(path + ".go", "w", encoding="ascii") as f:
+        f.write("go ucun\n" if ucun else "go\n")
 
 
 def read_progress(path, pos=0):
@@ -1312,6 +1456,10 @@ def main(argv=None):
     ap.add_argument("--ask", action="store_true", help="after the check and the backup, ask before writing")
     ap.add_argument("--inspect", action="store_true",
                     help="identify the flash and save a verified backup without a firmware package; no flash writes")
+    ap.add_argument("--protect", action="store_true",
+                    help="install the rescue bootloader (m-bootloader " + MBOOT_VERSION + ", downloaded and "
+                         "checked) in the boot area: the FM-1's own chip-key record kept, nothing else "
+                         "changed; with --write or --ask (without: check and back up only)")
     ap.add_argument("--allow-ucun-write", action="store_true",
                     help="explicitly allow EXPERIMENTAL UCUN UC25HQ80 recovery over direct USB")
     ap.add_argument("--download", action="store_true", help="fetch V15 from M-VAVE (checked) if no package is given")
@@ -1335,16 +1483,21 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.inspect and (args.write or args.ask or args.package or args.download or args.allow_ucun_write):
         ap.error("--inspect cannot be combined with a package, --download, --write, --ask or --allow-ucun-write")
+    if args.protect and (args.inspect or args.package or args.download or args.any_firmware or args.via != "usb"):
+        ap.error("--protect cannot be combined with a package, --download, --any-firmware, --inspect or --via")
     pf = ProgressFile(args.progress) if args.progress else None
     say = pf.say if pf else (lambda *a, **k: print(*a, **k, flush=True))
     try:
         pkg = args.package
         image, kind, product = None, None, None
-        if not pkg and not args.inspect:
+        boot = None
+        if args.protect:
+            boot = get_mbootloader(args.backup_dir or os.getcwd(), say)
+        elif not pkg and not args.inspect:
             if not args.download:
                 ap.error("give the V15 package, or --download")
             pkg = download_stock(os.getcwd(), say)
-        if not args.inspect:
+        if not args.inspect and not args.protect:
             image, kind, product = load_package(pkg)
             if kind != "v15" and not args.any_firmware:
                 raise Fail(f"{pkg} is {product}, not M-VAVE's V15: --any-firmware puts another FM-1 firmware back")
@@ -1352,7 +1505,8 @@ def main(argv=None):
         if kind == "other":
             say("  (not V15 and not Felucca-based: if it does not start, it may not fall back to the update "
                 "mode by itself)")
-        backup_dir = args.backup_dir or (os.getcwd() if args.inspect else os.path.dirname(os.path.abspath(pkg)))
+        backup_dir = args.backup_dir or (os.getcwd() if args.inspect or args.protect
+                                         else os.path.dirname(os.path.abspath(pkg)))
         via = args.via
         if via == "usb" and args.loader_kind == "mflr" and not args.loader:
             loader = get_mflr(backup_dir, say, args.mflr_dir)
@@ -1390,7 +1544,15 @@ def main(argv=None):
                 if via == "transporter":
                     dev.ensure_uboot(args.wait, say, stop)
                 details = {}
-                if args.inspect:
+                if args.protect:
+                    confirm = None
+                    if args.ask:
+                        confirm = pf.answer if pf else (lambda: ask("install the rescue bootloader"))
+                    result = protect(dev, boot, loader, args.write, backup_dir, say=say,
+                                     confirm=confirm, step=pf.step if pf else None,
+                                     owner=owner, allow_ucun=args.allow_ucun_write)
+                    details = {"result": result or "checked", "version": MBOOT_VERSION}
+                elif args.inspect:
                     _, info, path = inspect_backup(dev, loader, backup_dir, say=say,
                                                   step=pf.step if pf else None, owner=owner)
                     details = {"hardware": info, "backup": path}
@@ -1400,7 +1562,8 @@ def main(argv=None):
                            confirm=ask if args.ask else None, step=pf.step if pf else None, owner=owner,
                            strict_head=kind == "v15", allow_ucun=args.allow_ucun_write, kind=kind)
                 if pf:
-                    pf.put(end="ok", product=product, operation="inspect" if args.inspect else "rescue", **details)
+                    pf.put(end="ok", product=product, operation="protect" if args.protect else
+                           "inspect" if args.inspect else "rescue", **details)
                 return 0
             except Stopped:
                 raise

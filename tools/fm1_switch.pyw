@@ -4,16 +4,17 @@
 whatever its number. M-UPGRADE only takes a number higher than the one installed; this takes any
 package for the FM-1 model (the update itself is fm1_install.py's: Felucca's, over USB-MIDI).
 
-It lists the .fwsc files in its folders (its own, and "Firmware Wild" / "Firmware NB303" /
+It opens on four tasks: Protect my FM-1 (m-bootloader in the boot area, fm1_rescue.py --protect),
+Install firmware, Back up my FM-1 and My FM-1 won't start (the guide). Install firmware lists the .fwsc files in its folders (its own, and "Firmware Wild" / "Firmware NB303" /
 "Firmware n001se" / "Firmware Original" beside it or under C:\\Projects\\M-Vave FM1 n001se
 (~/M-Vave FM1 n001se on a Mac), and Downloads, if they are there; more with Add folder), newest
 first, reads what the FM-1 runs, and installs the one chosen with a progress bar. M-VAVE's own
-V15 (no Felucca loader) is not listed, but Rescue… finds it there.
+V15 (no Felucca loader) is not listed, but Through update mode… (the rescue) finds it there.
 
-Check FM-1 tells what state the FM-1 is in (running, an install cut off, the chip's own update mode,
+The guide tells what state the FM-1 is in (running, an install cut off, the chip's own update mode,
 or nothing on USB) and what to do. M-VAVE's SMK-37 Pro / Elite, MKE-P37 and Starrykey 37 Play (the
 FM-1's chip and update; not yet tried on a real keyboard) take their own firmware, M-VAVE's stock
-packages included, over USB-MIDI; never an FM-1's, and Rescue refuses them. Rescue… puts M-VAVE's stock firmware back on an FM-1 whose
+packages included, over USB-MIDI; never an FM-1's, and Rescue refuses them. The rescue puts M-VAVE's stock firmware back on an FM-1 whose
 firmware no longer starts, through the chip's own update mode (fm1_rescue.py, run as administrator
 or root: the program starts itself again with --rescue for that).
 
@@ -160,8 +161,8 @@ def install(backend, pkg, step, port=None):
     """the whole update; step(kind, value) as fm1_install's Progress gets it. -> the identity after"""
     if pkg.kind not in ("felucca", "stock"):
         raise I.InstallError("badpkg", f"{pkg.path.name} has no Felucca update loader, so it cannot be "
-                                       "installed over USB-MIDI here: use M-UPGRADE, or Check / unbrick… "
-                                       "and Rescue, which puts any FM-1 firmware back")
+                                       "installed over USB-MIDI here: use M-UPGRADE, or Install firmware… "
+                                       "and Through update mode…, which puts any FM-1 firmware back")
     product, image = I.load_package(str(pkg.path), False)
     up = I.Updater(backend, port=port)
     dev = up.find()
@@ -253,7 +254,7 @@ def rescue_result(product, identity):
         return False, f"Flash verified, but the FM-1 reports {identity}; expected {product}."
     return False, ("Flash verified. Startup has not been confirmed over MIDI. "
                    "If using an adapter, disconnect it after writing has finished, then reconnect "
-                   "the FM-1 directly by USB. Check the screen and press Check / unbrick….")
+                   "the FM-1 directly by USB. Check the screen, or open My FM-1 won't start.")
 
 
 def install_error_text(error):
@@ -261,8 +262,8 @@ def install_error_text(error):
     if error.code in ("stopped", "lost", "noloader"):
         text += ("\n\nSome FM-1 units use UCUN UC25HQ80 flash. Older firmware or update loaders "
                  "may reject it, causing failed updates or saves lost after power-off. This error "
-                 "alone does not identify the chip. Hardware / backup… can read it if the device "
-                 "already reaches the chip's UBOOT mode. Use a release whose author confirms UCUN "
+                 "alone does not identify the chip. Back up my FM-1 reads it (and saves a "
+                 "backup). Use a release whose author confirms UCUN "
                  "support; installing successfully does not prove that saves persist.")
     return text
 
@@ -365,22 +366,23 @@ def advice(state, ident=None, probe_ok=True):
                 + KEYBOARD_NOTE)
     if state == "running":
         return (f"FM-1: runs {ident}",
-                "Choose a firmware file and press Install. If the screen is stuck, hold OCT- and OCT+ "
-                "for 5 seconds: that is the update mode, and Install works from there.")
+                "Install firmware… puts another firmware on it. If the screen is stuck (Wild, NB303), hold "
+                "OCT- and OCT+ for 5 seconds: that is the update mode, and Install works from there.")
     if state == "loader":
         return (f"FM-1: in update mode ({ident})",
                 "An install was cut off, and the FM-1 waits for it. Choose a firmware file (the same "
-                "one, or any other) and press Install to finish it.")
+                "one, or any other) in Install firmware… and press Install to finish it.")
     if state == "uboot":
         return ("FM-1: in the chip's own update mode",
-                "Its firmware does not start. Press Rescue… to put M-VAVE's stock firmware back; "
+                "Its firmware does not start. Open My FM-1 won't start, or Install firmware… and Through "
+                "update mode…, to put M-VAVE's stock firmware back; "
                 "then install Wild or NB303 as usual. (An SMK-37 keyboard in this mode: Rescue refuses "
                 "it, it is for the FM-1 only.)")
     return ("FM-1: not found",
             "1. A USB data cable straight into the computer (no hub), the FM-1 switched on, no other "
             "MIDI app open. 2. If it shows a picture but does not answer: hold OCT- and OCT+ for 5 "
             "seconds, then Check FM-1 again. 3. If the screen stays dark or it restarts over and over: "
-            "press Rescue… and switch it off and on; a firmware that keeps crashing ends up in the "
+            "open My FM-1 won't start and switch it off and on; a firmware that keeps crashing ends up in the "
             "chip's own update mode, where it is caught."
             + ("" if probe_ok else " (This computer cannot see that mode: pyusb is missing.)")
             + " 4. If nothing at all shows on USB: it needs an FM-1-transporter (RP2040) adapter.")
@@ -611,6 +613,157 @@ def rescue_args(target, d, progress, any_firmware=False, via="usb", inspect=Fals
     return a
 
 
+def protect_args(d, progress):
+    """the helper's arguments for Protect my FM-1: it backs up, plans, waits for the window's answer
+    (R.answer) and only then writes the boot area"""
+    a = ["--protect", "--ask", "--backup-dir", str(d), "--mflr-dir", str(d),
+         "--wait", "300", "--tries", "1", "--progress", str(progress)]
+    if hasattr(os, "getuid"):
+        a += ["--owner", f"{os.getuid()}:{os.getgid()}"]
+    return a
+
+
+# ------------------------------------------------------- protect my FM-1 ---
+# The rescue bootloader (m-bootloader) in seven screens: why, connect, update mode, backup, review,
+# writing, try REC. The helper (fm1_rescue.py --protect --ask) does the device side; these are its words.
+
+PROTECT_WHY = ("With the rescue bootloader, your FM-1 can always be reached: hold REC while you switch it "
+               "on, and it opens update mode, whatever happened to its firmware.",
+               "A damaged firmware is not started: the FM-1 shows why and waits for a new one.",
+               "Only the FM-1's boot area changes (16 KiB of 1 MiB). Your firmware, sounds, patterns and "
+               "settings stay as they are.")
+PROTECT_CREDIT = ("The rescue bootloader is m-bootloader " + R.MBOOT_VERSION + " by Julius Vitkauskas (MIT), "
+                  "downloaded from its release and checked.")
+MBOOT_PAGE = "https://github.com/jvitkauskas/m-bootloader"
+PROTECT_TICK = "I will not unplug the cable or switch the FM-1 off for the next 10 seconds."
+UCUN_NOTE = ("This FM-1 has the newer UCUN flash. Writing on it is still marked experimental here. One early "
+             "UCUN unit did not start after an old m-bootloader (1.1 or 1.2, cause unknown); many have "
+             "worked since. The backup lets you put everything back.")
+PROTECT_STEP = {"ready": "Access granted. Restarting the FM-1 in update mode…",
+                "hardware": "Found the FM-1's chip. Reading the whole flash…",
+                "backup_read": "Reading the whole flash ({} of 2)…",
+                "analysis": "Saving the backup…",
+                "backup": "Checking the saved file…",
+                "write": "Writing… {}%. Do not switch off.",
+                "done": "Installed and verified. The FM-1 restarts."}
+MAP_COLORS = {"boot": "#6f42c1", "firmware": "#0969da", "settings": "#1a7f37", "pairings": "#bf8700",
+              "calibration": "#cf222e", "presets": "#2da44e", "sequences": "#1b9aaa", "sounds": "#d4a72c",
+              "mac": "#cf222e", "free": "#d0d7de"}
+
+
+def chip_text(info):
+    """the flash chip, in plain words"""
+    fid = str(info.get("jedec_id", "")).upper()
+    return {"856014": "the first FM-1 flash (Puya)", "B36014": "the newer FM-1 flash (UCUN)"}.get(
+        fid, f"{info.get('flash_name', 'unknown flash')} ({fid or '?'})")
+
+
+def found_text(hardware, analysis):
+    """what the backup found, as the guide shows it"""
+    lines = [f"Flash chip: {chip_text(hardware)}."]
+    if analysis:
+        lines.append(f"Bootloader: {analysis.get('bootloader_text', 'unknown')}.")
+        fw = analysis.get("firmware", "unknown")
+        st = analysis.get("firmware_status")
+        lines.append(f"Firmware: {fw}" + ("" if st in (None, "ok", "not_found") else
+                                          f" ({analysis.get('firmware_status_text', st)})") + ".")
+        if analysis.get("firmware_hub"):
+            lines.append(HUB_CREDIT)
+    return "\n".join(lines)
+
+
+def plan_text(p):
+    """the review screen's sentence for the helper's plan"""
+    n = len(p.get("sectors") or [])
+    text = (f"This writes the boot area: {n} of 256 sectors (4 KiB each), marked on the map. "
+            "The firmware, sounds, patterns and settings are not touched.")
+    if not p.get("firmware_ok", True):
+        text += (" The firmware on this FM-1 is not whole: the rescue bootloader will not start it, and the "
+                 "FM-1 waits in update mode for a new one.")
+    return text
+
+
+def last_backup(d):
+    """the newest backup's description saved in folder d (fm1-backup-*.bin.json): (info, when) or None"""
+    best = None
+    try:
+        files = list(Path(d).glob("fm1-backup-*.bin.json"))
+    except OSError:
+        return None
+    for f in files:
+        try:
+            info = json.loads(f.read_text(encoding="utf-8"))["hardware"]
+            when = f.stat().st_mtime
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(info, dict) and (best is None or when > best[1]):
+            best = (info, when)
+    return best
+
+
+def protection(d):
+    """"protected", "not" or None (never read): from the newest backup or protect run in folder d"""
+    b = last_backup(d)
+    stamp = Path(d) / "protected.json"
+    try:
+        p = json.loads(stamp.read_text(encoding="utf-8"))
+        pw = stamp.stat().st_mtime
+    except (OSError, ValueError):
+        p, pw = None, 0
+    if p and (b is None or pw >= b[1]):
+        return "protected"
+    if b is None:
+        return None
+    return "protected" if b[0].get("bootloader") == "open" else "not"
+
+
+def mark_protected(d, version):
+    """after a verified install: the start screen shows the FM-1 as protected"""
+    try:
+        (Path(d) / "protected.json").write_text(json.dumps({"version": version, "when": time.time()}),
+                                                encoding="utf-8")
+    except OSError:
+        pass
+
+
+def map_legend(regions):
+    """[(region, its name, its colour)] for the regions a 256-sector map holds, in flash order"""
+    seen = []
+    for r in regions:
+        if r not in seen:
+            seen.append(r)
+    return [(r, R.FL.REGION_TEXT.get(r, r), MAP_COLORS.get(r, MAP_COLORS["free"])) for r in seen]
+
+
+REC_STEPS = ("Switch the FM-1 off.",
+             "Hold REC and switch it on. Keep holding REC until its screen shows update mode.",
+             "Let go of REC. Then switch it off and on again without holding anything: your firmware "
+             "starts as before.")
+REC_NOTE = ("If the FM-1's screen shows update mode, the rescue works, even if this window does not see it. "
+            "(Holding PLAY instead of REC opens the rescue bootloader's menu.)")
+PROTECT_FAIL_WRITTEN = ("Do not switch the FM-1 off. Keep it connected: it stays in update mode. Run Protect "
+                        "my FM-1 again, which writes the boot area again from the start. Your full backup "
+                        "is saved here:")
+
+TASK_TEXT = {"protect": "Install the rescue bootloader, so the FM-1 can always be reached: hold REC while "
+                        "you switch it on. A full backup is saved first.",
+             "install": "Put Wild, NB303, Felucca or another FM-1 firmware on it, over USB.",
+             "backup": "Save the whole flash: firmware, sounds, patterns and settings, read twice and checked.",
+             "guide": "A guide finds out what state the FM-1 is in and what to try, one step at a time."}
+INSTALL_HELP = ("Choose a firmware file and press Install. The FM-1 keeps running while it updates, over USB-MIDI. "
+                "Through update mode… writes a firmware through the chip's own update mode instead, for an "
+                "FM-1 whose firmware does not start.")
+BACKUP_TEXT = ("FM-1 Switch restarts the FM-1 in update mode, reads its whole flash twice, compares the reads "
+               "with the chip's own checksum and saves them as one checked backup file. Nothing on the FM-1 "
+               "is erased or written.\n\n"
+               "Next: it downloads the checked flash reader and asks for administrator access. Switch the "
+               "FM-1 off and on afterwards. Keep backups private: they hold your FM-1's own data.")
+
+PROTECTION_TEXT = {"protected":"Protected: hold REC while you switch it on to reach update mode.",
+                   "not": "Not protected yet: Protect my FM-1 is step 1.",
+                   None: "Protection: not checked yet. Protect my FM-1 is step 1."}
+
+
 def applescript_admin(cmd):
     """osascript's line that runs cmd as root, after the system's password window"""
     line = " ".join(shlex.quote(c) for c in cmd)
@@ -747,10 +900,11 @@ def main():
     st.configure("Head.TLabel", font=head_f)
     st.configure("Title.TLabel", font=title_f)
     st.configure("Section.TLabel", foreground=C["muted"], font=(family, small_f[1], "bold"))
+    st.configure("Badge.TLabel", foreground=C["accent"], font=(family, small_f[1], "bold"))
     st.configure("Treeview", rowheight=px(30), font=body_f)
     st.configure("Treeview.Heading", font=small_f)
-    root.geometry(f"{px(760)}x{px(560)}")
-    root.minsize(px(620), px(460))
+    root.geometry(f"{px(760)}x{px(600)}")
+    root.minsize(px(640), px(520))
     dark_titlebar(root, dark)
     folders = default_folders()
     state = {"pkgs": [], "busy": False, "rescue": None}
@@ -775,21 +929,81 @@ def main():
     status = tk.StringVar(value="Connect the FM-1 with a USB data cable, close other MIDI apps.")
     msg = ttk.Label(card, textvariable=status, style="Muted.TLabel", justify="left", wraplength=px(520))
     msg.grid(row=1, column=1, sticky="we", pady=(px(4), 0))
+    prot_var = tk.StringVar(value=PROTECTION_TEXT[None])
+    prot = ttk.Label(card, textvariable=prot_var, style="Muted.TLabel", justify="left", wraplength=px(520))
+    prot.grid(row=2, column=1, sticky="we", pady=(px(4), 0))
     card_btns = ttk.Frame(card)
-    card_btns.grid(row=0, column=2, rowspan=2, sticky="ne", padx=(px(12), 0))
-    card.bind("<Configure>", lambda e: msg.configure(wraplength=max(px(200), e.width - px(220))))
+    card_btns.grid(row=0, column=2, rowspan=3, sticky="ne", padx=(px(12), 0))
+    card.bind("<Configure>", lambda e: [m.configure(wraplength=max(px(200), e.width - px(200))) for m in (msg, prot)])
 
     def set_tone(t):
         tone["value"] = t
         dot.itemconfigure(dot_id, fill=C.get(t, C["off"]))
 
-    row = ttk.Frame(top)                        # (packed from the bottom: the list takes what is left)
-    row.pack(side="bottom", fill="x", pady=(px(12), 0))
+    # the start screen: four tasks, the first marked step 1 until the FM-1 is protected
+    adv = ttk.Frame(top)                        # (packed from the bottom: the tasks take what is left)
+    adv.pack(side="bottom", fill="x", pady=(px(10), 0))
     bar = ttk.Progressbar(top, maximum=100)
     bar.pack(side="bottom", fill="x", pady=(px(12), 0))
-    ttk.Label(top, text="FIRMWARE FILES", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
-    lf = ttk.Frame(top)
+    ttk.Label(top, text="WHAT DO YOU WANT TO DO?", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
+    tasks = ttk.Frame(top)
+    tasks.pack(fill="both", expand=True)
+    tasks.columnconfigure((0, 1), weight=1, uniform="t")
+    tasks.rowconfigure((0, 1), weight=1, uniform="t")
+    badge = tk.StringVar(value="STEP 1")
+
+    def tile(r, c, title, text, button, command, var=None):
+        t = ttk.Frame(tasks, style="Card.TFrame", padding=(px(14), px(12)))
+        t.grid(row=r, column=c, sticky="nsew", padx=(0, px(6)) if c == 0 else (px(6), 0),
+               pady=(0, px(6)) if r == 0 else (px(6), 0))
+        b = ttk.Button(t, text=button, command=command)
+        b.pack(side="bottom", anchor="w", pady=(px(8), 0))
+        if var is not None:
+            ttk.Label(t, textvariable=var, style="Badge.TLabel").pack(anchor="w")
+        ttk.Label(t, text=title, style="Head.TLabel").pack(anchor="w")
+        d = ttk.Label(t, text=text, style="Muted.TLabel", wraplength=px(300), justify="left")
+        d.pack(anchor="w", fill="x", pady=(px(4), 0))
+        t.bind("<Configure>", lambda e: d.configure(wraplength=max(px(120), e.width - px(30))))
+        return b
+    pb_ = tile(0, 0, "Protect my FM-1", TASK_TEXT["protect"], "Protect…", lambda: open_protect(), badge)
+    tb_ = [pb_,
+           tile(0, 1, "Install firmware", TASK_TEXT["install"], "Choose firmware…", lambda: show_install()),
+           tile(1, 0, "Back up my FM-1", TASK_TEXT["backup"], "Back up…", lambda: do_inspect()),
+           tile(1, 1, "My FM-1 won't start", TASK_TEXT["guide"], "Open the guide…", lambda: open_guide())]
+
+    def show_protection():
+        p = protection(rescue_dir())
+        prot_var.set(PROTECTION_TEXT[p])
+        badge.set("" if p == "protected" else "STEP 1")
+        pb_.configure(style="TButton" if p == "protected" else "Accent.TButton")
+
+    # Install firmware: its own window, made once and shown when asked (the list keeps its files)
+    inst = tk.Toplevel(root)
+    inst.withdraw()
+    inst.title("FM-1 Switch – Install firmware")
+    inst.configure(background=C["bg"])
+    inst.geometry(f"{px(720)}x{px(460)}")
+    inst.transient(root)
+    inst.protocol("WM_DELETE_WINDOW", inst.withdraw)
+    inst_f = ttk.Frame(inst, padding=(px(20), px(16)))
+    inst_f.pack(fill="both", expand=True)
+    ttk.Label(inst_f, text="Install firmware", style="Head.TLabel").pack(anchor="w")
+    ttk.Label(inst_f, text=INSTALL_HELP, style="Muted.TLabel", wraplength=px(670),
+              justify="left").pack(anchor="w", pady=(px(4), px(10)))
+    row = ttk.Frame(inst_f)
+    row.pack(side="bottom", fill="x", pady=(px(12), 0))
+    ttk.Label(inst_f, text="FIRMWARE FILES", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
+    lf = ttk.Frame(inst_f)
     lf.pack(fill="both", expand=True)
+    shown_once = {"inst": False}
+
+    def show_install():
+        inst.deiconify()
+        inst.lift()
+        inst.focus_set()
+        if not shown_once["inst"]:
+            shown_once["inst"] = True
+            dark_titlebar(inst, dark)
     cols = ("fam", "name", "id", "note")
     lst = ttk.Treeview(lf, columns=cols, show="headings", selectmode="browse", height=6)
     for c, t, w, s in (("fam", "Family", 90, False), ("name", "File", 280, True), ("id", "Identity", 120, False),
@@ -840,10 +1054,9 @@ def main():
         shown.wait()
 
     port_var = tk.StringVar(value="Automatic")
-    port_row = ttk.Frame(top)
-    port_row.pack(side="bottom", fill="x", pady=(px(6), 0))
-    ttk.Label(port_row, text="MIDI input:", style="Muted.TLabel").pack(side="left")
-    port_box = ttk.Combobox(port_row, textvariable=port_var, state="readonly", width=42)
+    ttk.Label(adv, text="ADVANCED", style="Section.TLabel").pack(side="left", padx=(0, px(10)))
+    ttk.Label(adv, text="MIDI input:", style="Muted.TLabel").pack(side="left")
+    port_box = ttk.Combobox(adv, textvariable=port_var, state="readonly", width=30)
     port_box.pack(side="left", padx=px(8))
 
     def selected_port():
@@ -863,6 +1076,7 @@ def main():
             lst.insert("", "end", values=("", "No .fwsc files here yet: Add folder…", "", ""), tags=("other",))
         elif state["pkgs"][0].kind == "felucca":
             choose(lst, 0)
+        show_protection()
 
     def busy(on):
         state["busy"] = on
@@ -899,12 +1113,21 @@ def main():
         port = selected_port()
         threading.Thread(target=work, daemon=True).start()
 
-    def do_rescue(via="usb"):
-        """Rescue: 1 choose the firmware to put back, 2 accept the risk, 3 run it"""
-        if state["rescue"]:                                     # the button is Stop while it waits
+    def stop_rescue():
+        """the card's Stop, while a run waits for the FM-1 (a write in progress is finished)"""
+        if state["rescue"]:
             open(state["rescue"] + ".stop", "w").close()
             status.set("Stopping (only while it waits: a write in progress is finished)…")
-            return
+
+    def stopper(on):
+        if on:
+            stop_b.state(["!disabled"])
+            stop_b.pack(pady=(px(4), 0))
+        else:
+            stop_b.pack_forget()
+
+    def do_rescue(via="usb"):
+        """Rescue: 1 choose the firmware to put back, 2 accept the risk, 3 run it"""
         if state["busy"]:
             return
         d = rescue_dir()
@@ -999,15 +1222,330 @@ def main():
     def do_inspect():
         if state["busy"]:
             return
-        if messagebox.askokcancel("FM-1 Switch – Hardware / backup",
-                "This reads the chip ID and saves two matching full flash reads as a verified backup. "
-                "It loads a checked program into device RAM; it does not erase or write flash.\n\n"
-                "Use this when the device already reaches the chip's UBOOT mode. A running MIDI "
-                "firmware does not expose its flash ID here. Do not interrupt a working firmware "
-                "to force this mode. Unknown chips and keyboards are refused.\n\n"
-                "Next: download the checked RAM loader and request administrator access. Power-cycle "
-                "the device afterwards. Keep full backups private: they contain device and user data.", parent=root):
+        if messagebox.askokcancel("FM-1 Switch – Back up my FM-1", BACKUP_TEXT, parent=root):
             run_rescue(None, rescue_dir(), "usb", inspect=True)
+
+    def open_protect():
+        """Protect my FM-1 in seven screens: why, connect, update mode, backup, check and confirm, writing,
+        try REC. The helper (fm1_rescue.py --protect --ask) backs up and plans; it writes only after Install."""
+        if state["busy"]:
+            return
+        d = rescue_dir()
+        w = dialog("FM-1 Switch – Protect my FM-1", 680, 620)
+        body = ttk.Frame(w, padding=(px(20), px(16)))
+        body.pack(fill="both", expand=True)
+        wrap = px(630)
+        live = {"open": True, "page": None, "prog": None, "running": False, "writing": False,
+                "cancel": False, "hardware": None, "backup": None, "bar": None}
+        say = tk.StringVar()
+        found = tk.StringVar()
+        port = selected_port()
+
+        def clear(page):
+            """a new screen: its button row comes first, at the bottom"""
+            live["page"] = page
+            for c in body.winfo_children():
+                c.destroy()
+            r = ttk.Frame(body)
+            r.pack(fill="x", side="bottom", pady=(px(12), 0))
+            return r
+
+        def heading(n, t):
+            if n:
+                ttk.Label(body, text=f"STEP {n} OF 7", style="Section.TLabel").pack(anchor="w")
+            ttk.Label(body, text=t, style="Head.TLabel", wraplength=wrap, justify="left").pack(
+                anchor="w", pady=(px(2), px(10)))
+
+        def text(t, style="TLabel", var=None, **kw):
+            lab = ttk.Label(body, text=t, textvariable=var, style=style, wraplength=wrap, justify="left")
+            lab.pack(anchor="w", **kw)
+            return lab
+
+        def tick_row(var, t, cmd):
+            """a check box beside a label that wraps (a ttk check box does not)"""
+            f = ttk.Frame(body)
+            f.pack(fill="x", pady=(px(8), 0))
+            ttk.Checkbutton(f, variable=var, command=cmd).pack(side="left", anchor="n")
+            lab = ttk.Label(f, text=t, wraplength=wrap - px(40), justify="left")
+            lab.pack(side="left", fill="x")
+            lab.bind("<Button-1>", lambda e: (var.set(not var.get()), cmd()))
+
+        def close():
+            if live["writing"]:
+                messagebox.showinfo("FM-1 Switch", "The boot area is being written. Let it finish: it takes a "
+                                    "few seconds. Do not unplug the FM-1.", parent=w)
+                return
+            if live["running"]:
+                live["cancel"] = True
+                open(live["prog"] + ".stop", "w").close()
+                say.set("Stopping after this step… Nothing has been written.")
+                return                  # (the window closes when the run has ended)
+            live["open"] = False
+            w.destroy()
+        w.protocol("WM_DELETE_WINDOW", close)
+
+        def why():
+            r = clear("why")
+            heading(1, "Protect my FM-1")
+            for t in PROTECT_WHY:
+                text("•  " + t, pady=(0, px(6)))
+            if protection(d) == "protected":
+                text("This FM-1 looks protected already. Running this again checks it, and changes nothing "
+                     "if it is.", style="Muted.TLabel", pady=(px(4), 0))
+            text(PROTECT_CREDIT, style="Muted.TLabel", pady=(px(10), 0))
+            link = ttk.Label(body, text=MBOOT_PAGE, style="Muted.TLabel", foreground=C["accent"], cursor="hand2")
+            link.pack(anchor="w")
+            link.bind("<Button-1>", lambda e: webbrowser.open(MBOOT_PAGE))
+            ttk.Button(r, text="Next", style="Accent.TButton", command=connect).pack(side="right")
+            ttk.Button(r, text="Cancel", command=close).pack(side="right", padx=(0, px(8)))
+
+        def connect():
+            r = clear("connect")
+            heading(2, "Connect your FM-1")
+            for i, t in enumerate(("Connect the FM-1 to this computer with a USB data cable.",
+                                   "Switch it on, with the firmware you normally use.",
+                                   "Close other apps that use its MIDI port (a DAW, a web editor)."), 1):
+                text(f"{i}. {t}", pady=(0, px(4)))
+            text("Next, FM-1 Switch downloads the rescue bootloader and the flash reader, checks both, and asks "
+                 "for administrator access. Take your time with that window: nothing is written until you "
+                 "say so in step 5.", style="Muted.TLabel", pady=(px(10), 0))
+            text(dev_var.get(), style="Muted.TLabel", pady=(px(8), 0))
+            ttk.Button(r, text="Start", style="Accent.TButton", command=start).pack(side="right")
+            ttk.Button(r, text="Back", command=why).pack(side="right", padx=(0, px(8)))
+            ttk.Button(r, text="Cancel", command=close).pack(side="left")
+
+        def moving(n, title, lines):
+            """a screen that waits on the FM-1: a moving bar and the helper's own words"""
+            r = clear(title)
+            heading(n, title)
+            for t in lines:
+                text(t, pady=(0, px(6)))
+            pb = ttk.Progressbar(body, mode="indeterminate")
+            pb.pack(fill="x", pady=(px(10), px(6)))
+            pb.start(12)
+            text("", style="Muted.TLabel", var=say)
+            ttk.Button(r, text="Cancel", command=close).pack(side="left")
+            return r
+
+        def update_mode():
+            moving(3, "Update mode", ("FM-1 Switch restarts the FM-1 in its chip's update mode. Its screen may "
+                                      "go dark or show a progress bar: that is expected.", UPDATE_MODE_KEYS))
+
+        def backing_up():
+            r = clear("backup")
+            heading(4, "Backing up your FM-1")
+            text("The whole flash is read twice, compared with the chip's own checksum and saved, before "
+                 "anything else happens. Keep the FM-1 connected.")
+            pb = ttk.Progressbar(body, maximum=3)
+            pb.pack(fill="x", pady=(px(12), px(6)))
+            live["bar"] = pb
+            text("", style="Muted.TLabel", var=say)
+            text("", var=found, pady=(px(12), 0))
+            ttk.Button(r, text="Cancel", command=close).pack(side="left")
+
+        def draw_map(regions, changed):
+            cols, cell = 32, px(17)
+            cv = tk.Canvas(body, width=cols * cell, height=(len(regions) + cols - 1) // cols * cell,
+                           highlightthickness=0, bd=0, background=C["bg"])
+            cv.pack(anchor="w", pady=(px(10), px(4)))
+            for i, reg in enumerate(regions):
+                x, y = i % cols * cell, i // cols * cell
+                hot = i * R.SECTOR in changed
+                cv.create_rectangle(x + 1, y + 1, x + cell - 1, y + cell - 1, fill=MAP_COLORS.get(reg, MAP_COLORS["free"]),
+                                    outline=C["fg"] if hot else "", width=2 if hot else 0)
+            leg = ttk.Frame(body)
+            leg.pack(anchor="w", fill="x")
+            for i, (reg, name, colour) in enumerate(map_legend(regions)):
+                sw = tk.Canvas(leg, width=px(12), height=px(12), highlightthickness=0, bd=0, background=C["bg"])
+                sw.create_rectangle(0, 0, px(12), px(12), fill=colour, outline="")
+                sw.grid(row=i // 4, column=i % 4 * 2, padx=(0, px(4)), pady=px(1))
+                ttk.Label(leg, text=name, style="Muted.TLabel").grid(row=i // 4, column=i % 4 * 2 + 1, sticky="w",
+                                                                    padx=(0, px(14)))
+            text("Outlined: the sectors this changes.", style="Muted.TLabel", pady=(px(4), 0))
+
+        def review(p):
+            r = clear("review")
+            heading(5, "Check and confirm")
+            text(plan_text(p))
+            text(f"Bootloader now: {p.get('from')}. After: m-bootloader {p.get('to')}.", style="Muted.TLabel",
+                 pady=(px(6), 0))
+            draw_map(p.get("map") or [], p.get("sectors") or [])
+            if live["backup"]:
+                text("Backup saved and checked: " + str(live["backup"]), style="Muted.TLabel", pady=(px(6), 0))
+            exp = bool((live["hardware"] or {}).get("experimental"))
+            ucun, ok = tk.BooleanVar(value=False), tk.BooleanVar(value=False)
+
+            def ticked():
+                go.state(["!disabled"] if ok.get() and (ucun.get() or not exp) else ["disabled"])
+            if exp:
+                text(UCUN_NOTE, style="Muted.TLabel", pady=(px(8), 0))
+                tick_row(ucun, "Write on this UCUN flash anyway (experimental).", ticked)
+            tick_row(ok, PROTECT_TICK, ticked)
+            go = ttk.Button(r, text="Install", style="Accent.TButton", command=lambda: install(ucun.get()))
+            go.state(["disabled"])
+            go.pack(side="right")
+            ttk.Button(r, text="Cancel", command=close).pack(side="right", padx=(0, px(8)))
+
+        def install(ucun):
+            live["writing"] = True
+            R.answer(live["prog"], ucun)
+            clear("write")
+            heading(6, "Writing the boot area")
+            text("Do not unplug the cable or switch the FM-1 off. It takes a few seconds; then everything is "
+                 "read back and checked.")
+            pb = ttk.Progressbar(body, maximum=100)
+            pb.pack(fill="x", pady=(px(12), px(6)))
+            live["bar"] = pb
+            text("", style="Muted.TLabel", var=say)
+
+        def try_rec(version, new):
+            r = clear("rec")
+            heading(7, "Try it: hold REC")
+            text((f"The rescue bootloader {version} is installed and checked. " if new else
+                  f"This FM-1 already has the rescue bootloader ({version}): nothing was written. ")
+                 + "Try it once, so you know it works:")
+            for i, t in enumerate(REC_STEPS, 1):
+                text(f"{i}. {t}", pady=(px(6), 0))
+            seen = tk.StringVar(value="Waiting for the FM-1 in update mode…")
+            text("", style="Head.TLabel", var=seen, pady=(px(14), 0))
+            text(REC_NOTE, style="Muted.TLabel", pady=(px(6), 0))
+            ttk.Button(r, text="Done", style="Accent.TButton", command=finish).pack(side="right")
+
+            def watch():
+                time.sleep(3)           # (the FM-1 has just left update mode to start its firmware)
+                got = False
+                while live["open"] and live["page"] == "rec":
+                    if not got and R.uboot_present():
+                        got = True
+                        ui(seen.set, "✓ Update mode reached: the rescue works. Now switch it off and on.")
+                    elif got:
+                        try:
+                            st_, ident = diagnose(backend, None, 0, port=port)
+                        except Exception:
+                            st_, ident = "none", None
+                        if st_ == "running":
+                            ui(seen.set, f"✓ Update mode reached, and the firmware runs again ({ident}).")
+                            return
+                    time.sleep(1.0)
+            threading.Thread(target=watch, daemon=True).start()
+
+        def failed(msg, wrote):
+            r = clear("failed")
+            heading(None, "Protect my FM-1 did not finish")
+            text(msg)
+            if wrote:
+                text(PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
+                text(str(live["backup"] or "(no backup path reported)"), style="Muted.TLabel")
+            elif "did not appear" in msg:
+                text("The FM-1 did not show up in update mode. " + UPDATE_MODE_KEYS, pady=(px(10), 0))
+            else:
+                text("Nothing was written to the FM-1.", pady=(px(10), 0))
+            ttk.Button(r, text="Try again", style="Accent.TButton", command=connect).pack(side="right")
+            ttk.Button(r, text="Close", command=close).pack(side="right", padx=(0, px(8)))
+
+        def finish():
+            live["open"] = False
+            w.destroy()
+            show_protection()
+            check_device(0)
+
+        def event(e):
+            if not live["open"]:
+                return
+            s, v = e.get("step"), e.get("value")
+            if "say" in e:
+                say.set(e["say"])
+            elif s == "hardware":
+                live["hardware"] = v
+                dev_var.set(f"Flash: {v.get('flash_name')} ({v.get('jedec_id')})")
+                backing_up()
+                found.set(found_text(v, None))
+                say.set(PROTECT_STEP["hardware"])
+            elif s in ("backup_read", "analysis", "backup") and live["page"] == "backup":
+                live["bar"].configure(value={"backup_read": v if isinstance(v, int) else 1,
+                                             "analysis": 2, "backup": 3}[s])
+                say.set(PROTECT_STEP[s].format(v))
+                if s == "analysis":
+                    found.set(found_text(live["hardware"], v))
+                elif s == "backup":
+                    live["backup"] = v
+            elif s == "plan":
+                review(v)
+            elif s == "write" and live["page"] == "write":
+                live["bar"].configure(value=v)
+                say.set(PROTECT_STEP["write"].format(v))
+            elif s == "done":
+                say.set(PROTECT_STEP["done"])
+
+        def ended(end):
+            state["rescue"] = None
+            busy(False)
+            wrote, live["writing"], live["running"] = live["writing"], False, False
+            if end and end.get("end") == "ok" and end.get("result") in ("installed", "already"):
+                mark_protected(d, end.get("version") or R.MBOOT_VERSION)
+                show_protection()
+                status.set("Protected: the rescue bootloader is on the FM-1.")
+                if live["open"]:
+                    try_rec(end.get("version") or R.MBOOT_VERSION, end["result"] == "installed")
+                return
+            if live["cancel"] and not wrote:
+                status.set("Protect my FM-1 was stopped. Nothing was written.")
+                live["open"] = False
+                w.destroy()
+                return
+            if not live["open"]:
+                return
+            if end is None:
+                failed("It did not start: administrator access was not given.", False)
+            elif end.get("end") == "ok":
+                failed("It stopped before writing.", False)
+            else:
+                failed(end.get("error") or "It failed.", wrote)
+
+        def start():
+            fd, prog = tempfile.mkstemp(prefix="fm1-protect-", suffix=".jsonl")
+            os.close(fd)
+            live.update(prog=prog, running=True, writing=False, cancel=False, hardware=None, backup=None)
+            state["rescue"] = prog
+            busy(True)
+            say.set("Getting the rescue bootloader and the flash reader…")
+            update_mode()
+
+            def work():
+                end = None
+                try:
+                    R.get_mbootloader(str(d), lambda t: ui(say.set, t.strip()))
+                    R.get_mflr(str(d), lambda t: ui(say.set, t.strip()))
+                    cmd = helper_command(protect_args(d, prog))
+                    ui_wait(say.set, "Waiting for system approval. Take your time: nothing has been written "
+                            "and no timer is running.")
+                    wait = run_elevated(cmd)
+                except Exception as e:
+                    ui(ended, {"end": "fail", "error": f"It did not start: {e}"})
+                    return
+                done = {}
+                t = threading.Thread(target=lambda: done.update(code=wait()), daemon=True)
+                t.start()
+                pos = 0
+                while True:
+                    alive = t.is_alive()
+                    ev, pos = R.read_progress(prog, pos)
+                    for e in ev:
+                        if e.get("step") == "ready":     # a running FM-1: the soft key, no keys to hold
+                            sent = send_update_mode(backend, port)
+                            ui(say.set, f"Restarting the FM-1 ({sent}) in update mode…" if sent else
+                               "Waiting for the FM-1 in update mode…")
+                        elif "end" in e:
+                            end = e
+                        else:
+                            ui(event, e)
+                    if not alive:
+                        break
+                    time.sleep(0.2)
+                ui(ended, end)
+            threading.Thread(target=work, daemon=True).start()
+
+        why()
 
     def run_rescue(target, d, via, inspect=False, allow_ucun=False):
         busy(True)
@@ -1051,14 +1589,13 @@ def main():
                     elif e.get("step") in RESCUE_STEP:
                         ui(status.set, RESCUE_STEP[e["step"]].format(e.get("value") or ""))
                         if e["step"] == "ready":
-                            ui(rb.configure, text="Stop")
-                            ui(rb.state, ["!disabled"])
+                            ui(stopper, True)
                             if via == "usb":                 # a running FM-1: the soft key, no keys to hold
                                 sent = send_update_mode(backend, port)
                                 ui(status.set, f"Restarting the FM-1 ({sent}) in update mode… " + UPDATE_MODE_KEYS
                                    if sent else "Waiting for the FM-1 in update mode. " + UPDATE_MODE_KEYS)
                         if e["step"] == "write":
-                            ui(rb.state, ["disabled"])
+                            ui(stop_b.state, ["disabled"])
                             ui(bar.configure, value=e["value"])
                         elif e["step"] == "done":
                             ui(bar.configure, value=100)
@@ -1104,7 +1641,7 @@ def main():
 
         def end_rescue():
             state["rescue"] = None
-            rb.configure(text="Rescue…")
+            stopper(False)
             busy(False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -1219,6 +1756,7 @@ def main():
             else:                       # install / finish: the chosen file, else the highest
                 if chosen(lst) is None and state["pkgs"]:
                     choose(lst, 0)
+                show_install()
                 do_install()
 
         if start == "rescue_failed":
@@ -1273,17 +1811,19 @@ def main():
             refresh()
 
     ib = ttk.Button(row, text="Install", style="Accent.TButton", width=12, command=do_install)
-    rb = ttk.Button(row, text="Rescue…", command=lambda: do_rescue())
-    buttons = [ttk.Button(card_btns, text="Check / unbrick…", command=open_guide),
-               ttk.Button(row, text="Add folder…", command=add_folder),
-               ttk.Button(row, text="Refresh", command=refresh), ib, rb,
-               ttk.Button(card_btns, text="Hardware / backup…", command=do_inspect)]
-    buttons[0].pack()
-    buttons[5].pack(pady=(px(4), 0))
+    rb = ttk.Button(row, text="Through update mode…", command=lambda: do_rescue())
+    check_b = ttk.Button(card_btns, text="Check again", command=check_device)
+    adapter_b = ttk.Button(adv, text="Adapter rescue (experimental)…",
+                           command=lambda: do_rescue("transporter"))
+    buttons = [check_b, ttk.Button(row, text="Add folder…", command=add_folder),
+               ttk.Button(row, text="Refresh", command=refresh), ib, rb, adapter_b, *tb_]
+    check_b.pack()
+    adapter_b.pack(side="right")
     buttons[1].pack(side="left", padx=(0, px(8)))
     buttons[2].pack(side="left")
     ib.pack(side="right")
     rb.pack(side="right", padx=(0, px(8)))
+    stop_b = ttk.Button(card_btns, text="Stop", command=stop_rescue)
     ttk.Button(head, text="About", command=lambda: messagebox.showinfo(
         "About FM-1 Switch", f"FM-1 Switch {app_version()}\n\n" + DISCLAIMER
         + "\n\nSource and licence: github.com/Saintpid/FM1-Switch (GPL-3.0)")).pack(side="right")

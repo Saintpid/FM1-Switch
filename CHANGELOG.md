@@ -4,6 +4,14 @@ A version is a `VERSION` change with its section below (CI checks the section is
 
 ## 1.5.0
 
+- **A new start screen.** The window now opens on four tasks: Protect my FM-1, Install firmware (the
+  firmware list and the rescue, which is now Through update mode…), Back up my FM-1 and My FM-1 won't
+  start (the guide). The MIDI input and the adapter rescue are under Advanced.
+- **Protect my FM-1.** Installs the rescue bootloader (m-bootloader 2.4 by Julius Vitkauskas), step by
+  step: afterwards, holding REC while you switch the FM-1 on always opens update mode. It saves a full
+  backup first, shows on a map of the flash what changes (only the boot area), keeps the FM-1's own
+  chip key, writes only after you confirm, reads everything back and checks it, and lets you try REC
+  once. Not on the newer UCUN flash unless you tick that too (experimental).
 - **No keys to hold to reach the update mode.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303,
   Felucca), Rescue and Hardware / backup restart it into the chip's own update mode over MIDI. If it
   does not answer, the window says which keys get it there. `fm1_install.py --update-mode` does the

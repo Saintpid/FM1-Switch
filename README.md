@@ -14,7 +14,7 @@ can go from one to the other and back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot-light.png" alt="FM-1 Switch: the FM-1's state on top, the firmware files below, Install" width="600">
+  <img src="docs/screenshot-light.png" alt="FM-1 Switch: the FM-1's state on top, then four tasks: Protect my FM-1, Install firmware, Back up my FM-1, My FM-1 won't start" width="600">
 </picture>
 
 It follows the system's dark or light mode (Windows 11's own look, through
@@ -26,10 +26,46 @@ Ready-made installers are distributed through [Noisebud on Patreon](https://www.
 GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
 uploading installers or application binaries.
 
+### The start screen and Protect my FM-1 in 1.5.0
+
+The window opens on the FM-1's state (and whether it is protected) and four tasks:
+
+| Task | What it does |
+|---|---|
+| **Protect my FM-1** (step 1 until it is done) | installs the rescue bootloader, below |
+| **Install firmware** | the firmware list, Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
+| **Back up my FM-1** | the verified full backup (formerly Hardware / backup) |
+| **My FM-1 won't start** | the guide (formerly Check / unbrick) |
+
+**Advanced** keeps the MIDI input and the rescue through the adapter.
+
+**Protect my FM-1** puts [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (Julius
+Vitkauskas, MIT; its v2.4 FM-1 build, downloaded from its release and checked against its SHA-256) in
+the FM-1's boot area. Afterwards, holding REC while you switch the FM-1 on always opens update mode,
+whatever happened to its firmware, and a damaged firmware is not started. It goes in seven screens:
+why, connect, update mode (the soft key, no keys to hold), the backup, check and confirm, writing, and
+trying REC once.
+
+- It saves a full backup first (two matching reads, the chip's own CRC32, the file read back).
+- It builds the new boot area over the FM-1's own: its chip-key record stays. It must pass the same
+  check as a bootable boot area, and nothing outside the 16 KiB boot area may change; otherwise
+  nothing is written.
+- The review screen shows a map of the flash with the sectors that change, and nothing is written
+  until you tick that you will not unplug it and press **Install**. On the newer UCUN flash it needs a
+  second, separate tick (experimental).
+- It writes the changed boot sectors with the header last, reads the whole flash back and compares it
+  with the chip's CRC32, then restarts the FM-1.
+- An FM-1 that already has this version is only backed up and restarted.
+- From the command line: `fm1_rescue.py --protect` (checks and plans, writes nothing),
+  `--protect --write` or `--protect --ask`.
+
+**Not released yet:** this waits until m-bootloader has been tried on hardware with Wild and NB303.
+An official M-VAVE update puts M-VAVE's own bootloader back; Protect my FM-1 can then be run again.
+
 ### Update mode, M-Flasher's loader and FM-1 016 in 1.5.0
 
 - **No keys to hold.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303, Felucca) and a rescue or
-  **Hardware / backup…** waits for the chip's update mode, FM-1 Switch sends it the soft key over
+  **Back up my FM-1** waits for the chip's update mode, FM-1 Switch sends it the soft key over
   MIDI, and it restarts into that mode by itself. Otherwise the window says which keys reach it.
 - **M-Flasher's flash loader.** Over USB the rescue now starts the flash loader of
   [M-Flasher](https://github.com/jvitkauskas/m-flasher) (from
@@ -134,7 +170,7 @@ update over USB-MIDI. FM-1 Switch hears them and installs a firmware made for th
 own stock file for it (V11 to V16, known by their SHA-256), or a port with Felucca's update loader
 (see [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37)). A firmware for another model is
 refused before anything is sent, so an FM-1 file never goes on a keyboard, nor a keyboard's on an
-FM-1. Check / unbrick… names the keyboard it hears.
+FM-1. My FM-1 won't start names the keyboard it hears.
 
 Rescue is for the FM-1 only. An SMK-37 in the chip's own update mode (a dark screen, a disk called
 `WL82 UBOOT1.00`) looks like an FM-1 there, so Rescue reads its flash and stops before it writes
@@ -146,7 +182,7 @@ None of this has been tried on a real keyboard yet.
 
 ## A bricked FM-1
 
-Press **Check / unbrick…**. A guide takes you through it in three steps:
+Press **My FM-1 won't start** (the guide; before 1.5.0, Check / unbrick…). It takes you through it in three steps:
 
 1. **It listens to the FM-1** for a few seconds, in every mode it can be in. When the FM-1 answers,
    that decides what to do, with no questions:
@@ -172,7 +208,7 @@ Press **Check / unbrick…**. A guide takes you through it in three steps:
      [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter), an RP2040 board wired to
      the USB lines that wakes the chip's update mode from outside.
 
-**Try to unbrick** (also the **Rescue…** button) puts a firmware back through the chip's own update
+**Try to unbrick** (also **Install firmware › Through update mode…**) puts a firmware back through the chip's own update
 mode, with no extra hardware. First you **choose the firmware**: M-VAVE's V15 is chosen at the top,
 because it is what the FM-1 came with. Any other FM-1 firmware works too: anything in the list, or
 any file with **Browse…** (Wild, NB303, n001se, FiMba-1, another M-VAVE version, other people's
