@@ -613,11 +613,13 @@ def rescue_args(target, d, progress, any_firmware=False, via="usb", inspect=Fals
     return a
 
 
-def protect_args(d, progress):
-    """the helper's arguments for Protect my FM-1: it backs up, plans, waits for the window's answer
-    (R.answer) and only then writes the boot area"""
-    a = ["--protect", "--ask", "--backup-dir", str(d), "--mflr-dir", str(d),
-         "--wait", "300", "--tries", "1", "--progress", str(progress)]
+def protect_args(d, progress, mode="protect", backup=None):
+    """the helper's arguments for Protect my FM-1 (mode "protect"), putting a backup back ("restore") or
+    M-VAVE's bootloader from one ("stock"): it backs up, plans, waits for the window's answer (R.answer)
+    and only then writes"""
+    what = ["--protect"] if mode == "protect" else ["--restore", str(backup)] + (["--boot-only"] if mode == "stock" else [])
+    a = what + ["--ask", "--backup-dir", str(d), "--mflr-dir", str(d),
+                "--wait", "300", "--tries", "1", "--progress", str(progress)]
     if hasattr(os, "getuid"):
         a += ["--owner", f"{os.getuid()}:{os.getgid()}"]
     return a
@@ -701,6 +703,32 @@ def last_backup(d):
     return best
 
 
+def backups(d):
+    """the backups saved in folder d, newest first: dicts with path, when, firmware, bootloader (its text),
+    kind ("stock", "open", ...) and flash; only those with their checksum beside them"""
+    out = []
+    try:
+        files = list(Path(d).glob("fm1-backup-*.bin"))
+    except OSError:
+        return out
+    for f in files:
+        try:
+            meta = json.loads(Path(str(f) + ".json").read_text(encoding="utf-8"))
+            hw = meta.get("hardware") or {}
+            if f.stat().st_size != R.FLASH_SIZE or not meta.get("backup_sha256"):
+                continue
+            out.append({"path": f, "when": f.stat().st_mtime, "firmware": hw.get("firmware", "unknown"),
+                        "bootloader": hw.get("bootloader_text", "unknown"), "kind": hw.get("bootloader"),
+                        "flash": hw.get("flash_name", "")})
+        except (OSError, ValueError, AttributeError):
+            continue
+    return sorted(out, key=lambda b: b["when"], reverse=True)
+
+
+def backup_row(b):
+    return (time.strftime("%Y-%m-%d %H:%M", time.localtime(b["when"])), b["firmware"], b["bootloader"])
+
+
 def protection(d):
     """"protected", "not" or None (never read): from the newest backup or protect run in folder d"""
     b = last_backup(d)
@@ -711,17 +739,17 @@ def protection(d):
     except (OSError, ValueError):
         p, pw = None, 0
     if p and (b is None or pw >= b[1]):
-        return "protected"
+        return "not" if p.get("state") == "not" else "protected"
     if b is None:
         return None
     return "protected" if b[0].get("bootloader") == "open" else "not"
 
 
-def mark_protected(d, version):
-    """after a verified install: the start screen shows the FM-1 as protected"""
+def mark_protected(d, version, state="protected"):
+    """after a verified install (or a backup put back: its own state): what the start screen shows"""
     try:
-        (Path(d) / "protected.json").write_text(json.dumps({"version": version, "when": time.time()}),
-                                                encoding="utf-8")
+        (Path(d) / "protected.json").write_text(json.dumps({"version": version, "state": state,
+                                                            "when": time.time()}), encoding="utf-8")
     except OSError:
         pass
 
@@ -759,9 +787,52 @@ BACKUP_TEXT = ("FM-1 Switch restarts the FM-1 in update mode, reads its whole fl
                "Next: it downloads the checked flash reader and asks for administrator access. Switch the "
                "FM-1 off and on afterwards. Keep backups private: they hold your FM-1's own data.")
 
+FLOW = {"protect": {"title": "Protect my FM-1", "install": "Install", "write": "Writing the boot area",
+                    "screen": "Protect my FM-1"},
+        "restore": {"title": "Put a backup back", "install": "Put it back", "write": "Putting the backup back",
+                    "screen": "Put a backup back"},
+        "stock": {"title": "Put M-VAVE's bootloader back", "install": "Put it back",
+                  "write": "Writing the boot area", "screen": "M-VAVE's bootloader back"}}
+RESTORE_WHY = ("This puts the whole flash back as it was when the backup was made: the firmware, its sounds, "
+               "patterns and settings, and the bootloader.",
+               "What is on the FM-1 now is saved first, as a new backup, so you can go back to it.",
+               "Only this FM-1's own backups are taken: another FM-1's is refused.")
+STOCK_WHY = ("This puts M-VAVE's own bootloader back from a backup made before Protect my FM-1. Only the boot "
+             "area changes: the firmware, sounds, patterns and settings stay.",
+             "Afterwards, holding REC no longer opens update mode. An official M-VAVE update does the same.",
+             "What is on the FM-1 now is saved first, as a new backup.")
+
+
+def restore_plan_text(p):
+    """the review screen's sentence for a backup put back"""
+    n = len(p.get("sectors") or [])
+    if p.get("boot_only"):
+        return (f"This writes the boot area: {n} of 256 sectors, marked on the map. The firmware, sounds, "
+                "patterns and settings are not touched.")
+    return (f"This writes {n} of 256 sectors (4 KiB each), marked on the map, so that the FM-1 holds exactly "
+            f"what the backup holds: {p.get('firmware', 'its firmware')} and its data"
+            + (", and the bootloader." if p.get("boot") else ". The bootloader is already the same."))
+
+
+BACKUPS_HELP = ("Each backup is the FM-1's whole flash, read twice and checked, saved in FM-1 Rescue beside this "
+                "program. Put back… returns the FM-1 to exactly that moment, bootloader included. M-VAVE's "
+                "bootloader back… takes only the boot area from a backup made before Protect my FM-1. "
+                "Keep backups private: they hold your FM-1's own data.")
+
 PROTECTION_TEXT = {"protected":"Protected: hold REC while you switch it on to reach update mode.",
                    "not": "Not protected yet: Protect my FM-1 is step 1.",
                    None: "Protection: not checked yet. Protect my FM-1 is step 1."}
+
+
+def open_folder(d):
+    """the folder in the system's own file window"""
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(d))
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(d)])
+    except Exception:
+        pass
 
 
 def applescript_admin(cmd):
@@ -968,7 +1039,7 @@ def main():
     pb_ = tile(0, 0, "Protect my FM-1", TASK_TEXT["protect"], "Protect…", lambda: open_protect(), badge)
     tb_ = [pb_,
            tile(0, 1, "Install firmware", TASK_TEXT["install"], "Choose firmware…", lambda: show_install()),
-           tile(1, 0, "Back up my FM-1", TASK_TEXT["backup"], "Back up…", lambda: do_inspect()),
+           tile(1, 0, "Back up my FM-1", TASK_TEXT["backup"], "Backups…", lambda: open_backups()),
            tile(1, 1, "My FM-1 won't start", TASK_TEXT["guide"], "Open the guide…", lambda: open_guide())]
 
     def show_protection():
@@ -1225,13 +1296,76 @@ def main():
         if messagebox.askokcancel("FM-1 Switch – Back up my FM-1", BACKUP_TEXT, parent=root):
             run_rescue(None, rescue_dir(), "usb", inspect=True)
 
-    def open_protect():
-        """Protect my FM-1 in seven screens: why, connect, update mode, backup, check and confirm, writing,
-        try REC. The helper (fm1_rescue.py --protect --ask) backs up and plans; it writes only after Install."""
+    def open_backups():
+        """Back up my FM-1: the backups saved here, newest first; back up now, put one back, or M-VAVE's
+        bootloader back from one made before Protect"""
         if state["busy"]:
             return
         d = rescue_dir()
-        w = dialog("FM-1 Switch – Protect my FM-1", 680, 620)
+        w = dialog("FM-1 Switch – Back up my FM-1", 720, 460)
+        f = ttk.Frame(w, padding=(px(20), px(16)))
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="Back up my FM-1", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(f, text=BACKUPS_HELP, style="Muted.TLabel", wraplength=px(670), justify="left").pack(
+            anchor="w", pady=(px(4), px(10)))
+        r = ttk.Frame(f)
+        r.pack(side="bottom", fill="x", pady=(px(12), 0))
+        box = ttk.Treeview(f, columns=("when", "fw", "boot"), show="headings", selectmode="browse", height=8)
+        for c, t, wd, st_ in (("when", "Saved", 140, False), ("fw", "Firmware", 260, True),
+                              ("boot", "Bootloader", 220, True)):
+            box.heading(c, text=t, anchor="w")
+            box.column(c, width=px(wd), anchor="w", stretch=st_)
+        box.pack(fill="both", expand=True)
+        items = []
+
+        def fill():
+            items[:] = backups(d)
+            box.delete(*box.get_children())
+            for b in items:
+                box.insert("", "end", values=backup_row(b))
+            if not items:
+                box.insert("", "end", values=("", "No backups yet: Back up now", ""))
+            else:
+                choose(box, 0)
+            picked()
+
+        def sel():
+            i = chosen(box)
+            return items[i] if i is not None and i < len(items) else None
+
+        def picked(_e=None):
+            b = sel()
+            put.state(["!disabled"] if b else ["disabled"])
+            stock.state(["!disabled"] if b and b["kind"] == "stock" else ["disabled"])
+        box.bind("<<TreeviewSelect>>", picked)
+
+        def go(mode):
+            b = sel()
+            if b:
+                w.destroy()
+                open_protect(mode, b)
+
+        def now():
+            w.destroy()
+            do_inspect()
+        ttk.Button(r, text="Back up now", style="Accent.TButton", command=now).pack(side="left")
+        ttk.Button(r, text="Open folder", command=lambda: open_folder(d)).pack(side="left", padx=(px(8), 0))
+        ttk.Button(r, text="Close", command=w.destroy).pack(side="right")
+        put = ttk.Button(r, text="Put back…", command=lambda: go("restore"))
+        put.pack(side="right", padx=(0, px(8)))
+        stock = ttk.Button(r, text="M-VAVE's bootloader back…", command=lambda: go("stock"))
+        stock.pack(side="right", padx=(0, px(8)))
+        fill()
+
+    def open_protect(mode="protect", backup=None):
+        """Protect my FM-1 in seven screens: why, connect, update mode, backup, check and confirm, writing,
+        try REC. The helper (fm1_rescue.py --protect --ask) backs up and plans; it writes only after Install.
+        The same screens put a backup back (mode "restore") or M-VAVE's bootloader from one ("stock")."""
+        if state["busy"]:
+            return
+        d = rescue_dir()
+        F = FLOW[mode]
+        w = dialog("FM-1 Switch – " + F["screen"], 680, 620)
         body = ttk.Frame(w, padding=(px(20), px(16)))
         body.pack(fill="both", expand=True)
         wrap = px(630)
@@ -1285,6 +1419,8 @@ def main():
         w.protocol("WM_DELETE_WINDOW", close)
 
         def why():
+            if mode != "protect":
+                return why_restore()
             r = clear("why")
             heading(1, "Protect my FM-1")
             for t in PROTECT_WHY:
@@ -1299,6 +1435,19 @@ def main():
             ttk.Button(r, text="Next", style="Accent.TButton", command=connect).pack(side="right")
             ttk.Button(r, text="Cancel", command=close).pack(side="right", padx=(0, px(8)))
 
+        def why_restore():
+            r = clear("why")
+            heading(1, F["title"])
+            b = backup["path"] if isinstance(backup, dict) else backup
+            info = backup if isinstance(backup, dict) else {}
+            for t in (RESTORE_WHY if mode == "restore" else STOCK_WHY):
+                text("•  " + t, pady=(0, px(6)))
+            if info:
+                text("The backup: " + "  ·  ".join(backup_row(info)), style="Muted.TLabel", pady=(px(8), 0))
+            text(str(b), style="Muted.TLabel")
+            ttk.Button(r, text="Next", style="Accent.TButton", command=connect).pack(side="right")
+            ttk.Button(r, text="Cancel", command=close).pack(side="right", padx=(0, px(8)))
+
         def connect():
             r = clear("connect")
             heading(2, "Connect your FM-1")
@@ -1306,8 +1455,9 @@ def main():
                                    "Switch it on, with the firmware you normally use.",
                                    "Close other apps that use its MIDI port (a DAW, a web editor)."), 1):
                 text(f"{i}. {t}", pady=(0, px(4)))
-            text("Next, FM-1 Switch downloads the rescue bootloader and the flash reader, checks both, and asks "
-                 "for administrator access. Take your time with that window: nothing is written until you "
+            text(("Next, FM-1 Switch downloads the rescue bootloader and the flash reader, checks both, and asks "
+                  if mode == "protect" else "Next, FM-1 Switch gets the flash reader, checks it, and asks ")
+                 + "for administrator access. Take your time with that window: nothing is written until you "
                  "say so in step 5.", style="Muted.TLabel", pady=(px(10), 0))
             text(dev_var.get(), style="Muted.TLabel", pady=(px(8), 0))
             ttk.Button(r, text="Start", style="Accent.TButton", command=start).pack(side="right")
@@ -1366,9 +1516,10 @@ def main():
         def review(p):
             r = clear("review")
             heading(5, "Check and confirm")
-            text(plan_text(p))
-            text(f"Bootloader now: {p.get('from')}. After: m-bootloader {p.get('to')}.", style="Muted.TLabel",
-                 pady=(px(6), 0))
+            text(plan_text(p) if mode == "protect" else restore_plan_text(p))
+            text(f"Bootloader now: {p.get('from')}. After: " + (f"m-bootloader {p.get('to')}." if mode == "protect"
+                                                                 else f"{p.get('to')}."),
+                 style="Muted.TLabel", pady=(px(6), 0))
             draw_map(p.get("map") or [], p.get("sectors") or [])
             if live["backup"]:
                 text("Backup saved and checked: " + str(live["backup"]), style="Muted.TLabel", pady=(px(6), 0))
@@ -1381,7 +1532,7 @@ def main():
                 text(UCUN_NOTE, style="Muted.TLabel", pady=(px(8), 0))
                 tick_row(ucun, "Write on this UCUN flash anyway (experimental).", ticked)
             tick_row(ok, PROTECT_TICK, ticked)
-            go = ttk.Button(r, text="Install", style="Accent.TButton", command=lambda: install(ucun.get()))
+            go = ttk.Button(r, text=F["install"], style="Accent.TButton", command=lambda: install(ucun.get()))
             go.state(["disabled"])
             go.pack(side="right")
             ttk.Button(r, text="Cancel", command=close).pack(side="right", padx=(0, px(8)))
@@ -1390,7 +1541,7 @@ def main():
             live["writing"] = True
             R.answer(live["prog"], ucun)
             clear("write")
-            heading(6, "Writing the boot area")
+            heading(6, F["write"])
             text("Do not unplug the cable or switch the FM-1 off. It takes a few seconds; then everything is "
                  "read back and checked.")
             pb = ttk.Progressbar(body, maximum=100)
@@ -1429,12 +1580,38 @@ def main():
                     time.sleep(1.0)
             threading.Thread(target=watch, daemon=True).start()
 
+        def done_page(new):
+            r = clear("rec")
+            heading(7, "Done")
+            text("The backup is back and checked. The FM-1 restarts." if new else
+                 "The FM-1 already holds this backup: nothing was written. The FM-1 restarts.")
+            seen = tk.StringVar(value="Waiting for its firmware to answer…")
+            text("", style="Head.TLabel", var=seen, pady=(px(14), 0))
+            text("If it does not answer, switch it off and on.", style="Muted.TLabel", pady=(px(6), 0))
+            ttk.Button(r, text="Done", style="Accent.TButton", command=finish).pack(side="right")
+
+            def watch():
+                for _ in range(60):
+                    if not (live["open"] and live["page"] == "rec"):
+                        return
+                    try:
+                        st_, ident = diagnose(backend, None, 0, port=port)
+                    except Exception:
+                        st_, ident = "none", None
+                    if st_ == "running":
+                        ui(seen.set, f"✓ The FM-1 runs {ident}.")
+                        return
+                    time.sleep(1.0)
+            threading.Thread(target=watch, daemon=True).start()
+
         def failed(msg, wrote):
             r = clear("failed")
-            heading(None, "Protect my FM-1 did not finish")
+            heading(None, F["title"] + " did not finish")
             text(msg)
             if wrote:
-                text(PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
+                text(PROTECT_FAIL_WRITTEN.replace("Run Protect my FM-1 again, which writes the boot area",
+                                                  "Run it again, which writes")
+                     if mode != "protect" else PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
                 text(str(live["backup"] or "(no backup path reported)"), style="Muted.TLabel")
             elif "did not appear" in msg:
                 text("The FM-1 did not show up in update mode. " + UPDATE_MODE_KEYS, pady=(px(10), 0))
@@ -1481,6 +1658,16 @@ def main():
             state["rescue"] = None
             busy(False)
             wrote, live["writing"], live["running"] = live["writing"], False, False
+            if end and end.get("end") == "ok" and mode != "protect" and end.get("result") in ("restored", "already"):
+                kind = backup.get("kind") if isinstance(backup, dict) else None
+                if mode == "stock" or kind in ("stock", "open"):
+                    mark_protected(d, None, "protected" if mode == "restore" and kind == "open" else "not")
+                show_protection()
+                status.set("The backup is back on the FM-1." if mode == "restore" else
+                           "M-VAVE's bootloader is back on the FM-1.")
+                if live["open"]:
+                    done_page(end["result"] == "restored")
+                return
             if end and end.get("end") == "ok" and end.get("result") in ("installed", "already"):
                 mark_protected(d, end.get("version") or R.MBOOT_VERSION)
                 show_protection()
@@ -1489,7 +1676,7 @@ def main():
                     try_rec(end.get("version") or R.MBOOT_VERSION, end["result"] == "installed")
                 return
             if live["cancel"] and not wrote:
-                status.set("Protect my FM-1 was stopped. Nothing was written.")
+                status.set(F["title"] + " was stopped. Nothing was written.")
                 live["open"] = False
                 w.destroy()
                 return
@@ -1514,9 +1701,11 @@ def main():
             def work():
                 end = None
                 try:
-                    R.get_mbootloader(str(d), lambda t: ui(say.set, t.strip()))
+                    if mode == "protect":
+                        R.get_mbootloader(str(d), lambda t: ui(say.set, t.strip()))
                     R.get_mflr(str(d), lambda t: ui(say.set, t.strip()))
-                    cmd = helper_command(protect_args(d, prog))
+                    cmd = helper_command(protect_args(d, prog, mode, backup["path"] if isinstance(backup, dict)
+                                                      else backup))
                     ui_wait(say.set, "Waiting for system approval. Take your time: nothing has been written "
                             "and no timer is running.")
                     wait = run_elevated(cmd)

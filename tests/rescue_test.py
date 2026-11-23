@@ -985,5 +985,110 @@ end = [e for e in ev if "end" in e]
 ok(code == 0 and end and end[-1]["operation"] == "protect" and end[-1]["result"] == "installed",
    "protect: the command line installs it and reports so")
 
+# ---- Restore: this FM-1's own backup back, boot area included
+def restore_on(flash, backup, write=True, **kw):
+    d = FakeMflr(flash, **{k: kw.pop(k) for k in ("fid",) if k in kw})
+    up = R.Uboot(d)
+    st = []
+    try:
+        r = R.restore(up, backup, MFLR, write, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)), **kw)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+saved = bytes(base)                                    # before Protect: M-VAVE's bootloader
+protected = R.protect(R.Uboot(FakeMflr(base)), MB, MFLR, True, tmp, say=quiet) and new
+changed = bytearray(protected)
+changed[0x50000:0x50010] = b"later presets...."[:16]     # and the user's data has changed since
+changed[0xC0000] ^= 0xFF
+r, d, up, st = restore_on(bytes(changed), saved)
+ok(r == "restored" and bytes(d.flash) == saved, "restore: the whole backup is back, boot area included")
+ok(d.erased and all(a < FL.KEY_MAC[0] for a in d.erased) and d.erased[-1] == 0
+   and all(a >= R.WRITE_MIN for a in d.erased[:-4]) and d.ran, "restore: data first, the boot area last, header last")
+ok(up.full_write is False and up.boot_write is False, "restore: the write permissions are closed again")
+pl = [v for k, v in st if k == "plan"][0]
+ok(pl["boot"] and "m-bootloader" in pl["from"] and "stock" in pl["to"] and len(pl["map"]) == 256,
+   "restore: the plan says the bootloader goes back")
+r, d, _, _ = restore_on(bytes(changed), saved, boot_only=True)
+ok(r == "restored" and bytes(d.flash) == saved[:R.WRITE_MIN] + bytes(changed)[R.WRITE_MIN:],
+   "restore: M-VAVE's bootloader alone back, the firmware and data stay")
+r, d, _, _ = restore_on(bytes(changed), protected, boot_only=True)
+ok(isinstance(r, R.Fail) and "M-VAVE's own bootloader" in str(r) and not d.erased,
+   "restore: boot only needs a backup with M-VAVE's bootloader")
+r, d, _, st = restore_on(saved, saved)
+ok(r == "already" and not d.erased, "restore: the same flash: nothing written")
+r, d, _, st = restore_on(bytes(changed), saved, write=False)
+ok(r is False and not d.erased and any(k == "plan" for k, _ in st), "restore: without --write it checks only")
+other = bytearray(saved)
+other[0xFF010] ^= 0x01
+r, d, _, _ = restore_on(bytes(changed), bytes(other))
+ok(isinstance(r, R.Fail) and "another FM-1" in str(r) and not d.erased, "restore: another FM-1's backup is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, meta={"hardware": {"unique_id": "ffff"}})
+ok(isinstance(r, R.Fail) and "unique ID" in str(r) and not d.erased, "restore: another unique ID is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, meta={"hardware": {"unique_id": "0123456789abcdef"}})
+ok(r == "restored", "restore: the same unique ID is taken")
+dead = bytearray(saved)
+dead[:R.WRITE_MIN] = unit_flash(key_ok=False)[:R.WRITE_MIN]
+r, d, _, _ = restore_on(bytes(changed), bytes(dead))
+ok(isinstance(r, R.Fail) and "boot area" in str(r) and not d.erased, "restore: a backup that could not start it is refused")
+kbb = bytearray(saved)
+kbb[R.TRIM_AT:R.TRIM_AT + len(R.TRIM_MARK)] = R.TRIM_MARK
+r, d, _, _ = restore_on(bytes(kbb), bytes(kbb[:R.TRIM_AT]) + b"x" + bytes(kbb[R.TRIM_AT + 1:]))
+ok(isinstance(r, R.Fail) and "keyboard" in str(r) and not d.erased, "restore: a keyboard is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, fid=R.UCUN_FLASH)
+ok(isinstance(r, R.Fail) and "UCUN" in str(r) and not d.erased, "restore: UCUN needs its explicit opt-in")
+r, d, _, _ = restore_on(bytes(changed), saved[:-1])
+ok(isinstance(r, R.Fail) and not d.erased, "restore: a cut-short backup is refused")
+up4 = R.Uboot(FakeMflr(base))
+try:
+    up4.write_any_sector(0x50000, bytes(R.SECTOR))
+    ok(False, "restore: no write outside restore()")
+except R.Fail:
+    ok(True, "restore: no write outside restore()")
+up4.full_write = True
+try:
+    up4.write_any_sector(FL.KEY_MAC[0], bytes(R.SECTOR))
+    ok(False, "restore: never the key and MAC sector")
+except R.Fail:
+    ok(True, "restore: never the key and MAC sector")
+bdir = Path(tempfile.mkdtemp())
+bf = bdir / "fm1-backup-x.bin"
+bf.write_bytes(saved)
+try:
+    R.read_backup(str(bf))
+    ok(False, "restore: a file without its checksum is refused")
+except R.Fail as e:
+    ok("checksum" in str(e), "restore: a file without its checksum is refused")
+(bdir / "fm1-backup-x.bin.sha256").write_text(R.sha256(saved) + "  fm1-backup-x.bin\n")
+ok(R.read_backup(str(bf))[0] == saved, "restore: a backup with its checksum is read")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "00", "hardware": {}}')
+try:
+    R.read_backup(str(bf))
+    ok(False, "restore: a backup that changed since is refused")
+except R.Fail as e:
+    ok("changed" in str(e), "restore: a backup that changed since is refused")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "%s", "hardware": {"unique_id": "u"}}' % R.sha256(saved))
+ok(R.read_backup(str(bf))[1]["hardware"]["unique_id"] == "u", "restore: its description comes with it")
+for bad in (["--restore", str(bf), "fixture.fwsc"], ["--restore", str(bf), "--protect"],
+            ["--restore", str(bf), "--via", "transporter"], ["--boot-only"]):
+    try:
+        with patch("sys.stderr"):
+            R.main(bad)
+        ok(False, "restore: " + " ".join(bad[2:] or bad) + " is refused")
+    except SystemExit as e:
+        ok(e.code == 2, "restore: " + " ".join(bad[2:] or bad) + " is refused")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "%s", "hardware": {}}' % R.sha256(saved))
+prog = str(Path(tmp) / "restore.jsonl")
+dev = FakeMflr(bytes(changed))
+with patch.object(R, "get_mflr", return_value=MFLR), patch.object(R, "is_admin", return_value=True), \
+        patch.object(R, "open_device", return_value=dev), patch.object(R, "release"), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}):
+    code = R.main(["--restore", str(bf), "--write", "--backup-dir", tmp, "--progress", prog])
+ev, _ = R.read_progress(prog)
+end = [e for e in ev if "end" in e]
+ok(code == 0 and end and end[-1]["operation"] == "restore" and end[-1]["result"] == "restored"
+   and bytes(dev.flash) == saved, "restore: the command line puts it back and reports so")
+
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

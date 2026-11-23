@@ -355,5 +355,34 @@ ok(S.protection(pd) == "protected" and S.last_backup(pd)[0]["bootloader"] == "op
 ok(all(k in S.PROTECTION_TEXT for k in ("protected", "not", None)) and set(S.TASK_TEXT) ==
    {"protect", "install", "backup", "guide"}, "window: the start screen's four tasks and the protection line")
 
+# ------------------------------------------------------------- backups ---
+ra = S.protect_args(rd, "p", "restore", "/b/fm1-backup-1.bin")
+sa = S.protect_args(rd, "p", "stock", "/b/fm1-backup-1.bin")
+ok(ra[:2] == ["--restore", "/b/fm1-backup-1.bin"] and "--boot-only" not in ra and "--ask" in ra and "--protect" not in ra
+   and sa[2] == "--boot-only" and "--write" not in ra + sa, "backups: put back, or the boot area alone, after the window's yes")
+bd = Path(tempfile.mkdtemp(prefix="fm1-backups-"))
+for n, kind, when in (("a", "stock", 1.0e9), ("b", "open", 1.1e9)):
+    f = bd / f"fm1-backup-{n}.bin"
+    f.write_bytes(bytes(R.FLASH_SIZE))
+    (bd / f"fm1-backup-{n}.bin.json").write_text(_json.dumps({"backup_sha256": "x", "hardware": {
+        "firmware": "Wild 0.3.43", "bootloader": kind, "bootloader_text": kind + " text"}}))
+    _os.utime(f, (when, when))
+(bd / "fm1-backup-c.bin").write_bytes(b"short")
+(bd / "fm1-backup-c.bin.json").write_text('{"backup_sha256": "x"}')
+(bd / "fm1-backup-d.bin").write_bytes(bytes(R.FLASH_SIZE))
+bl = S.backups(bd)
+ok([b["path"].name for b in bl] == ["fm1-backup-b.bin", "fm1-backup-a.bin"] and bl[1]["kind"] == "stock"
+   and S.backup_row(bl[0])[1:] == ("Wild 0.3.43", "open text") and S.backups(bd / "none") == [],
+   "backups: whole ones with their description, newest first")
+ok("3 of 256" in S.restore_plan_text({"sectors": [0, 1, 2], "boot": True, "firmware": "Wild"})
+   and "bootloader." in S.restore_plan_text({"sectors": [0], "boot": True})
+   and "already the same" in S.restore_plan_text({"sectors": [0x5000], "boot": False})
+   and "not touched" in S.restore_plan_text({"sectors": [0], "boot_only": True}), "backups: the plan in one sentence")
+S.mark_protected(pd, None, "not")
+_os.utime(pd / "protected.json", (2.3e9, 2.3e9))
+ok(S.protection(pd) == "not", "backups: M-VAVE's bootloader put back: not protected")
+ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S.FLOW.values()),
+   "backups: each flow has its words")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

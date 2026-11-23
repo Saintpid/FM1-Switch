@@ -18,8 +18,9 @@
   the FM-1's own. Keep its checks (chip key 980F, flash type 3 and exact flash ID 856014 or B36014,
   the app area decrypting with the chip key, a full backup checked against the chip's own CRC32
   first, the explicit risk tick in the window).
-- The boot area (below 0x4000) may only be written by a dedicated bootloader or restore flow, never
-  by the rescue: after a full verified backup, built with `fm1_flash.boot_area_for` (the unit's
+- The boot area (below 0x4000) may only be written by a dedicated bootloader or restore flow
+  (`protect()`, `restore()`: the FM-1's own checked backup, same key/MAC area, never the key/MAC
+  sector), never by the rescue: after a full verified backup, built with `fm1_flash.boot_area_for` (the unit's
   chip-key record kept), checked with `check_boot_area` before writing and verified after. Not to
   be released before m-bootloader has been tried on hardware with Wild and NB303.
 - B36014 (UCUN) writes are experimental and need explicit opt-in, over direct USB only. Unknown

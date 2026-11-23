@@ -59,6 +59,15 @@ trying REC once.
 - From the command line: `fm1_rescue.py --protect` (checks and plans, writes nothing),
   `--protect --write` or `--protect --ask`.
 
+**Back up my FM-1** lists the backups in `FM-1 Rescue`, newest first, with the firmware and the
+bootloader each holds. **Back up now** saves a new one. **Put back…** returns the FM-1 to that moment,
+boot area included, in the same seven screens: what is on it now is saved first; the backup must match
+its checksum (`.sha256` / `.json`), be this FM-1's own (its key and MAC area, and its flash's unique
+ID when both have one) and be able to start it; the firmware and data sectors are written first, the
+boot area last, and everything is read back and checked. **M-VAVE's bootloader back…** writes only
+the boot area of a backup made before Protect my FM-1. From the command line:
+`fm1_rescue.py --restore BACKUP [--boot-only] --ask` (or `--write`).
+
 **Not released yet:** this waits until m-bootloader has been tried on hardware with Wild and NB303.
 An official M-VAVE update puts M-VAVE's own bootloader back; Protect my FM-1 can then be run again.
 

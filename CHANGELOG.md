@@ -12,6 +12,11 @@ A version is a `VERSION` change with its section below (CI checks the section is
   backup first, shows on a map of the flash what changes (only the boot area), keeps the FM-1's own
   chip key, writes only after you confirm, reads everything back and checks it, and lets you try REC
   once. Not on the newer UCUN flash unless you tick that too (experimental).
+- **Put a backup back.** Back up my FM-1 lists the backups saved so far, newest first, with their
+  firmware and bootloader. Put back… returns the FM-1 to exactly that moment, bootloader, sounds,
+  patterns and settings included; M-VAVE's bootloader back… takes only the boot area from a backup
+  made before Protect my FM-1. Only the same FM-1's own, checked backups are taken, and what is on it
+  now is saved first.
 - **No keys to hold to reach the update mode.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303,
   Felucca), Rescue and Hardware / backup restart it into the chip's own update mode over MIDI. If it
   does not answer, the window says which keys get it there. `fm1_install.py --update-mode` does the
