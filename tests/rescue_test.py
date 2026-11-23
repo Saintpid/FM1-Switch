@@ -969,7 +969,20 @@ try:
     R.protect(up3, MB, MFLR, True, tmp, say=quiet)
     ok(False, "protect: a sector that will not verify stops it, the permission closed")
 except R.Fail as e:
-    ok("restore the backup" in str(e) and up3.boot_write is False, "protect: a sector that will not verify stops it, the permission closed")
+    ok("could not be put back" in str(e) and up3.boot_write is False,
+       "protect: a sector that will never write: it says the boot area must be put back, the permission closed")
+d = FakeMflr(base)
+up6 = R.Uboot(d)
+real6 = up6._program
+up6._program = lambda a, data: (_ for _ in ()).throw(R.Fail("sector did not verify")) \
+    if a == 0x1000 and data != base[a:a + R.SECTOR] else real6(a, data)
+with patch("time.sleep"):
+    try:
+        R.protect(up6, MB, MFLR, True, tmp, say=quiet)
+        ok(False, "protect: a failed boot sector: the old boot area is written back at once")
+    except R.Fail as e:
+        ok("put back as it was" in str(e) and bytes(d.flash) == base and up6.boot_write is False,
+           "protect: a failed boot sector: the old boot area is written back at once, the FM-1 as before")
 with patch.object(R, "fetch", return_value=b"not it"):
     try:
         R.get_mbootloader(None, quiet)

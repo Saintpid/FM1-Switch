@@ -1076,17 +1076,9 @@ def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=
         # the sector with the flash header and the file table last. A cut before the last sector still
         # leaves a boot area that cannot start (the old table points at a half-replaced bootloader): the
         # FM-1 then needs update mode from the ROM or the adapter, and the backup put back (restore())
-        for i, a in enumerate(sorted(diff, reverse=True)):
-            for attempt in range(3):
-                try:
-                    dev.write_boot_sector(a, new[a:a + SECTOR])
-                    break
-                except Fail as e:
-                    if attempt == 2:
-                        raise Fail(f"{e}; the FM-1 is still in update mode: keep it connected and restore "
-                                   "the backup (or run this again)")
-            step("write", (i + 1) * 100 // len(diff))
-            dev.show(bar=(i + 1) * 100 // len(diff), color=SCREEN_MINT)
+        # If a sector will not write, the boot sectors already changed are written back from the backup
+        # read moments ago, in the same session (the loader resets the chip after ~3 s without commands).
+        write_sectors(dev, now, new, sorted(diff, reverse=True), say, step)
     finally:
         dev.boot_write = False
     say("  final read ...")
@@ -1191,17 +1183,7 @@ def restore(dev, backup, loader, write, backup_dir, say=print, confirm=None, ste
     order = sorted((a for a in diff if a >= WRITE_MIN), reverse=True) + sorted(boot, reverse=True)
     dev.full_write = dev.boot_write = True
     try:
-        for i, a in enumerate(order):
-            for attempt in range(3):
-                try:
-                    (dev.write_boot_sector if a < WRITE_MIN else dev.write_any_sector)(a, new[a:a + SECTOR])
-                    break
-                except Fail as e:
-                    if attempt == 2:
-                        raise Fail(f"{e}; the FM-1 is still in update mode: keep it connected and put the "
-                                   "backup back again")
-            step("write", (i + 1) * 100 // len(order))
-            dev.show(bar=(i + 1) * 100 // len(order), color=SCREEN_MINT)
+        write_sectors(dev, now, new, order, say, step)
     finally:
         dev.full_write = dev.boot_write = False
     say("  final read ...")
@@ -1216,6 +1198,49 @@ def restore(dev, backup, loader, write, backup_dir, say=print, confirm=None, ste
     dev.run_app()
     step("done", None)
     return "restored"
+
+
+def _put(dev, a, data, tries=3, pause=0.3):
+    """one sector, a few tries a short pause apart (well inside the loader's ~3 s)"""
+    for attempt in range(tries):
+        try:
+            (dev.write_boot_sector if a < WRITE_MIN else dev.write_any_sector)(a, data)
+            return
+        except Fail:
+            if attempt == tries - 1:
+                raise
+            time.sleep(pause)
+
+
+def write_sectors(dev, now, new, order, say=print, step=None):
+    """new's sectors in this order (boot ones last). If one will not write, every boot sector already
+    touched is written back from now at once, while the loader still runs: the FM-1 is left with the boot
+    area it had, and says so; only if that fails too is it left in update mode to be put back"""
+    step = step or (lambda *a: None)
+    done = []
+    for i, a in enumerate(order):
+        try:
+            _put(dev, a, new[a:a + SECTOR])
+        except Fail as e:
+            back = [b for b in done + [a] if b < WRITE_MIN]
+            if not back:
+                raise Fail(f"{e}; the boot area was not touched: the FM-1 starts as before. Run it again to "
+                           "finish") from None
+            say(f"  sector {a:#07x} will not write ({e}); putting the boot area back as it was ...")
+            try:
+                for b in sorted(back, reverse=True):
+                    _put(dev, b, now[b:b + SECTOR], tries=5)
+                ok = dev.read(0, WRITE_MIN) == now[:WRITE_MIN]
+            except Exception:
+                ok = False
+            if ok:
+                raise Fail(f"{e}; the boot area was put back as it was and checked: the FM-1 starts as "
+                           "before") from None
+            raise Fail(f"{e}; the boot area could not be put back: do not switch the FM-1 off, keep it "
+                       "connected, and put the backup back (Back up my FM-1 > Put back…)") from None
+        done.append(a)
+        step("write", (i + 1) * 100 // len(order))
+        dev.show(bar=(i + 1) * 100 // len(order), color=SCREEN_MINT)
 
 
 def keep_alive(dev, confirm):

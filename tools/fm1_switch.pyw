@@ -1608,7 +1608,9 @@ def main():
             r = clear("failed")
             heading(None, F["title"] + " did not finish")
             text(msg)
-            if wrote:
+            if wrote and ("put back as it was" in msg or "was not touched" in msg):
+                text("Switch the FM-1 off and on: it starts as before. You can try again.", pady=(px(10), 0))
+            elif wrote:
                 text(PROTECT_FAIL_WRITTEN.replace("Run Protect my FM-1 again, which writes the boot area",
                                                   "Run it again, which writes")
                      if mode != "protect" else PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
