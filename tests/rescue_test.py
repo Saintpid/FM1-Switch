@@ -105,15 +105,29 @@ class FakeWin32:
     """DeviceIoControl as Windows' disk driver does it: the struct read from memory, the data
     through its pointer; PhysicalDrive0 is an ordinary disk, PhysicalDrive2 the FM-1"""
 
-    def __init__(self, dev):
+    def __init__(self, dev, volumes=None):
         self.C, self.dev, self.calls = C, dev, []
+        self.volumes = volumes or {}                           # drive letter -> the disk it is on
+        self.closed = []
 
     def open(self, path, rw):
+        if "PhysicalDrive" not in path:
+            c = path[4]
+            return 1000 + ord(c) if c in self.volumes else None
         n = int(path.rsplit("PhysicalDrive", 1)[1])
         return n + 100 if n in (0, 2) else None
 
     def ioctl(self, h, code, inaddr, n_in, outaddr, n_out):
         self.calls.append(code)
+        if h >= 1000:
+            c = chr(h - 1000)
+            if code == R.IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS:
+                C.memmove(outaddr, struct.pack("<I4xI4xqq", 1, self.volumes[c], 0, 1 << 20), 32)
+                return 32
+            if code in (R.FSCTL_LOCK_VOLUME, R.FSCTL_DISMOUNT_VOLUME):
+                self.calls.append((code, c))
+                return 0
+            raise R.Fail("Windows refused the command (error 1)")
         if code == R.IOCTL_STORAGE_QUERY_PROPERTY:
             v, p = (b"WL82", b"UBOOT1.00") if h == 102 else (b"Samsung", b"SSD 980")
             d = bytearray(64)
@@ -142,7 +156,7 @@ class FakeWin32:
         return n_in
 
     def close(self, h):
-        pass
+        self.closed.append(h)
 
 
 def app_head(image, key=0x980F):
@@ -1132,6 +1146,19 @@ with patch("urllib.request.urlopen", side_effect=_ue.URLError("offline")):
         ok(False, "download: other errors are not retried")
     except _ue.URLError as e:
         ok("offline" in str(e), "download: other errors are not retried")
+
+# ---- Windows: a drive letter mounted on the UBOOT disk is locked and dismounted first
+fw = FakeWin32(FakeUboot(base), volumes={"D": 0, "G": 2})
+said = []
+ws = R.WinScsi(r"\\.\PhysicalDrive2", fw, say=said.append)
+ok((R.FSCTL_LOCK_VOLUME, "G") in fw.calls and (R.FSCTL_DISMOUNT_VOLUME, "G") in fw.calls
+   and not any(isinstance(x, tuple) and x[1] == "D" for x in fw.calls) and any("G:" in t for t in said),
+   "Windows: the FM-1's drive letter is locked and dismounted, the system disk left alone")
+ok(1000 + ord("D") in fw.closed and 1000 + ord("G") not in fw.closed, "Windows: only the FM-1's drive stays held")
+ws.close()
+ok(1000 + ord("G") in fw.closed and 102 in fw.closed, "Windows: closing gives it back")
+ok(R.Uboot(R.WinScsi(r"\\.\PhysicalDrive2", FakeWin32(FakeUboot(base)))).inquiry()[0] == "WL82",
+   "Windows: with no drive letter, nothing to lock")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

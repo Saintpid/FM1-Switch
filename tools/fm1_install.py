@@ -259,6 +259,14 @@ class MidoLink:
         while not self.q.empty():
             self.q.get_nowait()
 
+    def close_input(self):
+        """stop listening: before the FM-1 restarts and its port goes away (Windows' MIDI input
+        crashes the program when its device vanishes while it is open)"""
+        try:
+            self.inp.close()
+        except Exception:
+            pass
+
     def close(self):
         for p in (self.inp, self.out):
             try:
@@ -450,11 +458,13 @@ def enter_update_mode(up):
     if not dev:
         raise not_found(up)
     try:
+        if hasattr(dev.link, "close_input"):
+            dev.link.close_input()                           # nothing more to hear: the FM-1 restarts
         if not dev.link.send(SOFT_KEY):
             raise InstallError("lost", "the FM-1 stopped answering before the soft key could be sent")
-        time.sleep(DELAY["open"])
     finally:
-        dev.link.close()
+        dev.link.close()                                     # at once: its port goes away as it restarts
+    time.sleep(DELAY["open"])
     return dev.id.text
 
 

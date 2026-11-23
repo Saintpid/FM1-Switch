@@ -36,6 +36,10 @@ def ok(cond, what):
 class FakeLink:
     def __init__(self, dev, gen):
         self.dev, self.gen, self.q, self.closed = dev, gen, queue.Queue(), False
+        self.listening_at_key = None
+
+    def close_input(self):
+        self.input_closed = True
 
     @property
     def lost(self):
@@ -45,6 +49,8 @@ class FakeLink:
         if self.lost:
             return False
         self.dev.sent.append(bytes(pkt))
+        if bytes(pkt) == bytes([0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7]):
+            self.listening_at_key = not getattr(self, "input_closed", False)
         self.dev.rx(bytes(pkt))
         return True
 
@@ -249,6 +255,8 @@ def installs():
     ok(rc == 0 and dev.sent[-1] == bytes([0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7]) and dev.upgrades == 0
        and "FM-1_872" in out and all(l.closed for l in dev.links),
        "--update-mode: the soft key to the FM-1 that answers, nothing else")
+    ok([l.listening_at_key for l in dev.links if l.listening_at_key is not None] == [False],
+       "--update-mode: its input is closed before the FM-1 restarts (Windows' MIDI input crashes otherwise)")
     rc, out, err = cli(["--update-mode"], FakeFM1(image, name="IAC Driver Bus 1"))
     ok(rc == 3, "--update-mode: no FM-1 -> exit 3")
     try:

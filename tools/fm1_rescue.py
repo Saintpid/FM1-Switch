@@ -462,6 +462,8 @@ class MflrLoader:
 # pass-through (as JieLi's own tools do): an administrator, but no driver to swap (no Zadig).
 IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x4D014
 IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400
+IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x560000
+FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME = 0x90018, 0x90020
 DATA_OUT, DATA_IN = 0, 1
 
 
@@ -548,14 +550,58 @@ def windows_uboot_disks(win=None):
     return out
 
 
-class WinScsi:
-    """the same xfer() as Bot, through IOCTL_SCSI_PASS_THROUGH_DIRECT on the UBOOT disk"""
+def volumes_on(disk, win):
+    """[(letter, handle)] of the drive letters Windows mounted on PhysicalDrive<disk> (the UBOOT disk
+    may get one, G: say): each handle open, for locking"""
+    C, out = win.C, []
+    for c in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        h = win.open(rf"\\.\{c}:", True)
+        if h is None:
+            continue
+        keep = False
+        try:
+            buf = C.create_string_buffer(8 + 24 * 8)          # VOLUME_DISK_EXTENTS, up to 8 extents
+            try:
+                win.ioctl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, None, 0, C.addressof(buf), len(buf))
+            except Fail:
+                continue
+            n = min(8, struct.unpack_from("<I", buf.raw, 0)[0])
+            if disk in [struct.unpack_from("<I", buf.raw, 8 + 24 * i)[0] for i in range(n)]:
+                out.append((c, h))
+                keep = True
+        finally:
+            if not keep:
+                win.close(h)
+    return out
 
-    def __init__(self, path, win=None):
+
+class WinScsi:
+    """the same xfer() as Bot, through IOCTL_SCSI_PASS_THROUGH_DIRECT on the UBOOT disk. A drive
+    letter Windows mounted on it is locked and dismounted first (while one is mounted, Windows refuses
+    the chip's commands with error 5), and stays locked until close()"""
+
+    def __init__(self, path, win=None, say=None):
         self.win = win or Win32()
         self.path = path
+        self.locked = []
+        try:
+            disk = int(path.rsplit("PhysicalDrive", 1)[1])
+        except (IndexError, ValueError):
+            disk = None
+        if disk is not None:
+            for c, h in volumes_on(disk, self.win):
+                for code in (FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME):
+                    try:
+                        self.win.ioctl(h, code, None, 0, None, 0)
+                    except Fail as e:
+                        if say:
+                            say(f"  (drive {c}: could not be {'locked' if code == FSCTL_LOCK_VOLUME else 'dismounted'}: {e})")
+                self.locked.append(h)
+                if say:
+                    say(f"  drive {c}: (the FM-1's update mode) taken from Windows until this ends")
         self.h = self.win.open(path, True)
         if self.h is None:
+            self.close()
             raise Fail(f"cannot open {path} (run as administrator)")
 
     def reset_recovery(self):
@@ -585,9 +631,12 @@ class WinScsi:
         return buf.raw[:n] if n_in else b""
 
     def close(self):
-        if self.h is not None:
+        if getattr(self, "h", None) is not None:
             self.win.close(self.h)
             self.h = None
+        for h in getattr(self, "locked", []):
+            self.win.close(h)                                # (closing unlocks; Windows mounts it again)
+        self.locked = []
 
 
 # ------------------------------------------------------------ transporter ---
@@ -1483,7 +1532,7 @@ def open_device(timeout, say=print, stop=None):
             if disks:
                 say(f"found it after {time.time() - t0:.1f} s ({disks[0]})")
                 try:
-                    t = WinScsi(disks[0])
+                    t = WinScsi(disks[0], say=say)
                     try:
                         Uboot(t).inquiry()
                     except Fail:
@@ -1754,6 +1803,8 @@ def main(argv=None):
                 raise
             except Exception as e:                           # (a USB error: it dropped out)
                 say(f"  attempt {attempt}: {e}")
+                if attempt < args.tries:
+                    time.sleep(1.5)                          # (Windows may still be setting the disk up)
                 if isinstance(e, Fail) and ("not writing" in str(e) or "not the FM-1" in str(e)
                                             or "nothing written" in str(e) or "did not appear" in str(e)):
                     raise
