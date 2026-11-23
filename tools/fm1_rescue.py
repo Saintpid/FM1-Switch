@@ -819,9 +819,11 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
         raise Fail("the reads do not match the chip's own checksum of the flash; nothing written")
     found = FL.analyse(now, key)
     info.update({k: found[k] for k in ("bootloader", "bootloader_text", "bootloader_version", "firmware",
-                                       "firmware_status", "layout", "boot_area_ok")})
+                                       "firmware_hub", "firmware_status", "layout", "boot_area_ok")})
     say(f"  bootloader: {found['bootloader_text']}; firmware: {found['firmware']} "
         f"({found['firmware_status_text']})")
+    if found["firmware_hub"]:
+        say(f"  ({FL.FW.CATALOG_CREDIT})")
     step("analysis", {**found, "map": FL.sector_map(now, key)})
     fd, path = tempfile.mkstemp(prefix=time.strftime("fm1-backup-%Y%m%d-%H%M%S-"),
                                 suffix=".bin", dir=backup_dir)

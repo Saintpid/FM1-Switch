@@ -33,3 +33,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## The Firmware Hub's list
+
+The firmware list in `tools/fm1_firmwares.py` (each firmware's id, name, maker, repository, identity
+pattern, build identity, flash chip and base) is The Firmware Hub's catalogue,
+https://thefirmwarehub.com/catalog.json, under the
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) licence:
+"Firmware list: The Firmware Hub – https://thefirmwarehub.com". It is shortened to those fields; no
+card texts or pictures are taken. Each firmware is its maker's, under its own licence, at the
+repository the list names.

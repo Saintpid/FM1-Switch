@@ -267,19 +267,22 @@ def install_error_text(error):
     return text
 
 
+HUB_CREDIT = "(Firmware names from The Firmware Hub, thefirmwarehub.com, CC BY 4.0.)"
+
+
 def hardware_text(info):
     found = ""
     if info.get("bootloader_text"):
         found = (f"Bootloader: {info['bootloader_text']}.\n"
                  f"Firmware: {info.get('firmware', 'unknown')}"
                  + ("" if info.get("firmware_status") in (None, "ok") else f" ({info['firmware_status'].replace('_', ' ')})")
-                 + ".\n")
+                 + ".\n" + (HUB_CREDIT + "\n" if info.get("firmware_hub") else ""))
     return (f"{info['flash_name']} — JEDEC {info['jedec_id']}\n"
             f"Chip key {info['chip_key']}, flash type {info['flash_type']}.\n" + found +
             "Firmware compatibility and persistent saves are not established by this identification.")
 
 
-UPDATE_MODE_KEYS = ("If it does not appear: with Wild, NB303 or Felucca, hold OCT− and OCT+ for 5 seconds; with "
+UPDATE_MODE_KEYS = ("If it does not appear: with Wild or NB303, hold OCT− and OCT+ for 5 seconds; with "
                     "the rescue bootloader (m-bootloader), hold REC while switching the FM-1 on.")
 
 

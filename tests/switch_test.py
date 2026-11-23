@@ -307,5 +307,12 @@ with patch.object(R, "package_flash_image", return_value=bytes(img)):
 ok(S.last_hardware(hw)[0]["jedec_id"] == "B36014" and S.last_hardware(hw / "missing") is None,
    "install: hardware reports read safely")
 
+hw_info = {"flash_name": "Puya P25Q80H", "jedec_id": "856014", "chip_key": "980F", "flash_type": 3,
+           "bootloader_text": "M-VAVE's (stock)", "firmware": "OberVave, by zvenson", "firmware_status": "ok"}
+ok("OberVave, by zvenson" in S.hardware_text({**hw_info, "firmware_hub": ["obervave"]})
+   and "thefirmwarehub.com" in S.hardware_text({**hw_info, "firmware_hub": ["obervave"]})
+   and "thefirmwarehub.com" not in S.hardware_text({**hw_info, "firmware_hub": []}),
+   "window: a firmware named from the hub's list credits it")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

@@ -15,10 +15,14 @@ A version is a `VERSION` change with its section below (CI checks the section is
 - **See what is on the FM-1.** Hardware / backup names the bootloader (M-VAVE's, m-bootloader and its
   version, or damaged) and the firmware (Wild 0.3.38, FM-1 016, Felucca, ...), and whether it is
   whole.
+- **Knows the community firmwares.** The firmware on the FM-1 is named from The Firmware Hub's list
+  of about 300 firmwares (OberVave, Felucca, SLOOP, ...), by the identity it carries; several that
+  share one are told as "one of: ...". What is not known about a firmware stays "unknown".
 - **M-VAVE's FM-1 016.** M-VAVE's download now gives 016; Rescue takes V15 or 016 and writes 016 whole
   (to 0xA9000). It points out when the firmware on the FM-1 keeps its data in another layout.
 - **The FM-1 keeps its own bootloader, for V15 too.** A rescue to V15 no longer stops when the FM-1's
   boot area is not V15's (016's, m-bootloader): it must just be one that can start the FM-1.
+- Firmware list: [The Firmware Hub](https://thefirmwarehub.com) (CC BY 4.0).
 - Thanks to Julius Vitkauskas's [M-Flasher](https://github.com/jvitkauskas/m-flasher) and
   [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (MIT): their loader, formats and checks.
 

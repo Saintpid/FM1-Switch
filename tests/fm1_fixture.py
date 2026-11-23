@@ -68,3 +68,13 @@ def boot_area(boot=STOCK_BOOT):
     if boot not in _AREAS:
         _AREAS[boot] = unit_flash(boot)[:F.BOOT_AREA]
     return _AREAS[boot]
+
+
+def with_app(flash, text, key=F.CHIP_KEY):
+    """flash with an app area holding one app.bin of these plain bytes (its table, ENC with the chip key)"""
+    f = bytearray(flash)
+    body = bytes(text) + b"\0" * (-len(text) % 32)
+    plain = entry("app.bin", 0x200, len(text), F.crc16(bytes(text)), 0x82).ljust(0x200, b"\0") + body
+    for a in range(0, len(plain), 32):
+        f[F.BOOT_AREA + a:F.BOOT_AREA + a + 32] = F.enc(plain[a:a + 32], key ^ ((a >> 2) & 0xFFFF))
+    return bytes(f)

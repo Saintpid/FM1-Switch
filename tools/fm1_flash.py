@@ -21,6 +21,8 @@ Read-only here: building a new boot area returns bytes, and nothing in this modu
 import struct
 import zlib
 
+import fm1_firmwares as FW
+
 FLASH_SIZE = 0x100000
 SECTOR = 0x1000
 BOOT_AREA = 0x4000
@@ -477,12 +479,19 @@ def bootloader_info(flash):
 
 def firmware_info(flash, key=CHIP_KEY):
     """a name for the installed firmware ("Wild 0.3.38", "FM-1 016 (stock)", "Felucca", ...)"""
+    return firmware_match(flash, key)[0]
+
+
+def firmware_match(flash, key=CHIP_KEY):
+    """(the installed firmware's name, the Firmware Hub entries its identities point at): our own
+    firmwares and SLOOP by their version text, then a single hub entry, Felucca's text, several hub
+    entries ("one of: ..."), M-VAVE's own identities"""
     if app_files_status(flash, key) == APP_NOT_FOUND:
-        return "none"
+        return "none", []
     table = app_table(flash, key)
     app = next((e for e in table if e.name == "app.bin"), None)
     if app is None or BOOT_AREA + app.addr + app.len > len(flash):
-        return "unknown"
+        return "unknown", []
     text = app_read(flash, BOOT_AREA, app.addr, app.len, key)
     idents = sorted(set(_identities(text)), key=lambda x: x[1])
     baud_girl = any(e.name == "VM" and e.addr == 0xD9000 for e in table)
@@ -490,12 +499,22 @@ def firmware_info(flash, key=CHIP_KEY):
     for prefix, name in ((b"Wild ", "Wild"), (b"NB303 ", "NB303"), (b"n001se ", "n001se")):
         v = _after(text, prefix, digits)
         if v:
-            return f"{name} {v}"
+            return f"{name} {v}", []
+    hub = FW.match(FW.product_ids(text))
+    if len(hub) == 1:
+        return FW.describe(hub), hub
+    named = lambda n: [e for e in hub if e["name"] == n]                    # noqa: E731
     v = _after(text, b"SLOOP ", digits)
     if v:
-        return f"SLOOP {v}" + (" (Snoop37)" if idents and idents[-1][0].startswith("SMK") else "")
+        return f"SLOOP {v}" + (" (Snoop37)" if idents and idents[-1][0].startswith("SMK") else ""), named("SLOOP")
     if b"Felucca" in text:
-        return "Felucca"
+        return "Felucca", named("Felucca")
+    if hub:
+        return FW.describe(hub), hub
+    return _model_name(idents, baud_girl), []
+
+
+def _model_name(idents, baud_girl):
     if idents:
         model, version = idents[-1]
         n = f"{model} {version}"
@@ -534,8 +553,10 @@ def analyse(flash, key=CHIP_KEY):
     """-> dict: what the flash image holds, for the report and the window"""
     kind, text, version = bootloader_info(flash)
     status = app_files_status(flash, key)
+    name, hub = firmware_match(flash, key)
     return {"bootloader": kind, "bootloader_text": text, "bootloader_version": version,
-            "firmware": firmware_info(flash, key), "firmware_status": status,
+            "firmware": name, "firmware_hub": [e["id"] for e in hub],
+            "firmware_chip": hub[0]["chip"] if len(hub) == 1 else None, "firmware_status": status,
             "firmware_status_text": APP_TEXT[status], "layout": layout(flash, key),
             "keyboard": is_keyboard(flash, key),
             "boot_area_ok": _boot_ok(flash)}

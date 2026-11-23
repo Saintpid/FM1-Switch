@@ -41,6 +41,13 @@ uploading installers or application binaries.
 - **What is on the FM-1.** The identification now reads which bootloader the FM-1 has (M-VAVE's,
   m-bootloader and its version, damaged), which firmware (Wild 0.3.38, FM-1 016, Felucca, ...)
   and whether it is whole, and a map of what each 4 KiB of the flash holds, for the window.
+  Firmwares from [The Firmware Hub](https://thefirmwarehub.com) are named by the identity their app
+  carries (`FM-1_9535` is OberVave), from the hub's list in `tools/fm1_firmwares.py` (CC BY 4.0).
+  When several share one identity (`FM-1_900`), it says "one of: ...". It never guesses: what
+  nobody has checked about a firmware (its keys for update mode, whether it starts under
+  m-bootloader) stays "unknown". `python tools/fm1_firmwares.py --update catalog.json` rewrites the
+  list from the hub's [catalogue](https://thefirmwarehub.com/catalog.json) (read it at most once a
+  day, as the hub asks).
 - **M-VAVE's FM-1 016.** M-VAVE's download now serves 016; the rescue takes V15 or 016 (each known by
   its SHA-256) and writes 016's whole image, to 0xA9000. When the installed
   firmware keeps its data in another layout (015 against 016), the rescue says so.
@@ -287,6 +294,8 @@ with no hardware, no Tk and no MIDI or USB packages:
   helpers from a fresh interpreter, the shared runtime's pins, and the Mac build's release rules.
 - `flash_test.py`: reading a whole flash image (the boot area's table, the stored bootloader and
   whether it can start the FM-1, the boot areas built for a new bootloader, the sector map).
+- `firmwares_test.py`: the Firmware Hub's list (every pattern, matching by identity, an identity
+  many firmwares share), naming the installed firmware with it, and rewriting it from a catalogue.
 - `rescue_test.py`: the rescue against a simulated UBOOT (the ROM, JieLi's loader and M-Flasher's at
   the level of their commands), over USB, over a simulated Windows pass-through and over a simulated
   FM-1-transporter. It covers any firmware with the FM-1's head kept, and refuses one for another
@@ -306,6 +315,7 @@ Instruments). The rescue protocol and write policy come from
 [m-bootloader](https://github.com/jvitkauskas/m-bootloader)'s releases, downloaded and checked, and
 the flash formats, the boot-area checks and the loader's protocol are ported from
 [M-Flasher](https://github.com/jvitkauskas/m-flasher) (both MIT, (c) 2026 Julius Vitkauskas: see
-[third_party/NOTICE.md](third_party/NOTICE.md)). The SMK-37 facts (its identities, packages and flash map) come
+[third_party/NOTICE.md](third_party/NOTICE.md)). Firmware list: [The Firmware Hub](https://thefirmwarehub.com)
+(CC BY 4.0); each firmware belongs to its maker, named with its repository in the list. The SMK-37 facts (its identities, packages and flash map) come
 from [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37), and the stock packages' SHA-256 from
 [smk-37-pro-docs](https://github.com/jonathaslacerda/smk-37-pro-docs). Not affiliated with M-VAVE or JieLi.
