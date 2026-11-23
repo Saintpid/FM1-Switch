@@ -18,7 +18,7 @@ $icon = Join-Path $root 'installer\FM1Switch.ico'
 $script = Join-Path $root 'installer\FM1Switch.iss'
 $baseName = "FM-1 Switch Setup $version"
 # Exact versions, as the Mac build pins them.
-$packages = @('mido==1.3.3', 'packaging==24.2', 'python-rtmidi==1.5.8', 'pyserial==3.5', 'sv-ttk==2.6.1', 'pyinstaller==6.22.3')
+$packages = @('mido==1.3.3', 'packaging==24.2', 'python-rtmidi==1.5.8', 'pyserial==3.5', 'sv-ttk==2.6.1', 'truststore==0.10.1', 'certifi==2025.1.31', 'pyinstaller==6.22.3')
 
 function Invoke-Checked([string]$what, [scriptblock]$block) {
     & $block
@@ -42,7 +42,8 @@ Push-Location (Join-Path $root 'tools')
 try {
     Invoke-Checked 'PyInstaller' {
         & $py -m PyInstaller --noconfirm --windowed --name FM1-Switch --icon $icon --paths . `
-            --hidden-import mido.backends.rtmidi --hidden-import serial.tools.list_ports --collect-data sv_ttk `
+            --hidden-import mido.backends.rtmidi --hidden-import serial.tools.list_ports --hidden-import truststore --hidden-import certifi `
+            --collect-data sv_ttk --collect-data certifi `
             --add-data "$(Join-Path $root 'VERSION');." --add-data "$(Join-Path $root 'LICENSE');." `
             --add-data "$(Join-Path $root 'DISCLAIMER.md');." `
             --distpath (Join-Path $work 'dist') --workpath (Join-Path $work 'pyi') --specpath $work fm1_switch.pyw

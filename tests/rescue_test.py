@@ -1090,5 +1090,48 @@ end = [e for e in ev if "end" in e]
 ok(code == 0 and end and end[-1]["operation"] == "restore" and end[-1]["result"] == "restored"
    and bytes(dev.flash) == saved, "restore: the command line puts it back and reports so")
 
+# ---- downloads: a certificate the first check cannot follow is tried with the next
+import ssl as _ssl  # noqa: E402
+import urllib.error as _ue  # noqa: E402
+tried = []
+
+
+class _R:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return b"got"
+
+
+def _open(url, timeout=None, context=None):
+    tried.append(context)
+    if context is None:
+        raise _ue.URLError(_ssl.SSLCertVerificationError("unable to get issuer certificate"))
+    return _R()
+
+
+with patch("urllib.request.urlopen", _open):
+    ok(R.fetch("https://x", contexts=[None, "system"]) == b"got" and tried == [None, "system"],
+       "download: an unknown issuer is tried with the system's own check")
+    try:
+        R.fetch("https://x", contexts=[None])
+        ok(False, "download: when no check trusts it, the certificate error is told")
+    except _ue.URLError as e:
+        ok("issuer" in str(e), "download: when no check trusts it, the certificate error is told")
+first = next(R._trust())
+ok(first is not None and first.verify_mode == _ssl.CERT_REQUIRED and first.check_hostname
+   and first.verify_flags & getattr(_ssl, "VERIFY_X509_PARTIAL_CHAIN", 0) == getattr(_ssl, "VERIFY_X509_PARTIAL_CHAIN", 0),
+   "download: the first check takes a chain that ends at any trusted certificate, and still verifies")
+with patch("urllib.request.urlopen", side_effect=_ue.URLError("offline")):
+    try:
+        R.fetch("https://x", contexts=[None, "system"])
+        ok(False, "download: other errors are not retried")
+    except _ue.URLError as e:
+        ok("offline" in str(e), "download: other errors are not retried")
+
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

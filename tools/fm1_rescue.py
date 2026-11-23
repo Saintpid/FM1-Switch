@@ -1184,9 +1184,45 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def fetch(url, timeout=60):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read()
+def _trust():
+    """TLS contexts to try, in order: Python's own (taking a partial chain), the system's verifier (truststore: on Windows it
+    fetches an intermediate certificate the local store has not seen yet, as browsers do), certifi's
+    list. Every download is checked by its SHA-256 as well."""
+    import ssl
+    ctx = ssl.create_default_context()
+    # a chain that ends at any trusted certificate, not only a self-signed root (Python 3.13+ does this by
+    # default): Windows may offer a cross-signed copy of a trusted root whose own root it lacks
+    ctx.verify_flags |= getattr(ssl, "VERIFY_X509_PARTIAL_CHAIN", 0)
+    yield ctx
+    try:
+        import truststore
+        yield truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:
+        import certifi
+        yield ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+
+
+def _cert_error(e):
+    import ssl
+    return isinstance(e, ssl.SSLCertVerificationError) or isinstance(getattr(e, "reason", None),
+                                                                     ssl.SSLCertVerificationError)
+
+
+def fetch(url, timeout=60, contexts=None):
+    err = None
+    for ctx in (contexts if contexts is not None else _trust()):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout, context=ctx) as r:
+                return r.read()
+        except Exception as e:
+            if not _cert_error(e):
+                raise
+            err = e
+    raise err
 
 
 def get_loader(path=None, cache_dir=None, say=print):
