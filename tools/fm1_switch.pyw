@@ -1235,6 +1235,10 @@ def main():
     try:
         import sv_ttk                           # Sun Valley: Windows 11's own look for ttk
         sv_ttk.set_theme("dark" if dark else "light")
+        # its colours (tk_setPalette) once, now: left bound, they ran again after each style change of ours
+        # and set every label's own text colour to plain black or white, over Muted, Badge and the rest
+        root.tk.call("configure_colors")
+        root.tk.call("bind", root.winfo_class(), "<<ThemeChanged>>", "")
     except Exception:
         ttk.Style().theme_use("clam")
     C = dict(PALETTE[dark])

@@ -2,6 +2,12 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.11
+
+- **Grey and blue texts are back.** RECOMMENDED, NEXT and the quieter help texts had all turned plain
+  black (white in dark mode): the theme kept setting every text's colour again after the app had set
+  its own.
+
 ## 1.5.10
 
 - **A little colour.** Buttons have a soft tint now, so it is easier to see what can be pressed, and

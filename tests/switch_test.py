@@ -451,5 +451,9 @@ _bad = [(h, d) for d in _sheets for h, c in S.HUES.items()
 ok(not _bad and S.contrast((0, 0, 0), (255, 255, 255)) > 20,
    f"look: every soft button's text reads at 4.5:1 or more, light and dark ({len(_sheets)} themes) {_bad}")
 
+_theme = _main_src[_main_src.index("sv_ttk.set_theme("):_main_src.index("C = dict(PALETTE[dark])")]
+ok('"<<ThemeChanged>>", ""' in _theme and "configure_colors" in _theme,
+   "look: sv_ttk's colours applied once, so our own label colours (Muted, Badge) stay")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)
