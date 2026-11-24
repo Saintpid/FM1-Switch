@@ -4,6 +4,10 @@ A version is a `VERSION` change with its section below (CI checks the section is
 
 ## 1.5.6
 
+- **Start here.** A new button at the top takes someone who has just got an FM-1 through the three
+  first things, in order: make a backup, give it a spare key (Protect my FM-1, which can be skipped),
+  put on a firmware. Each step is ticked from what is really there, so it remembers how far you got.
+  The firmware step links to The Firmware Hub, where FM-1 firmwares are listed.
 - **Putting a backup back after a cut-off write, made clearer.** Its steps no longer ask you to
   switch the FM-1 on and let its firmware start (it waits in update mode, and that is what is
   needed), a Put back that was itself cut off offers the same backup again, not the half-written

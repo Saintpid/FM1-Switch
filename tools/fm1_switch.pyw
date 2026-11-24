@@ -796,7 +796,7 @@ PUTBACK_GAVE_UP = ("Not everything could be put back as it was. Do not switch th
                    "start. The backup made just before writing:")
 
 TASK_TEXT = {"protect": "Give the FM-1 a spare key: hold REC while you switch it on, and new firmware can go "
-                        "on even if the old one breaks. Do this first.",
+                        "on even if the old one breaks. Make a backup first.",
              "install": "Put a new firmware on the FM-1, over the USB cable.",
              "backup": "Copy everything on the FM-1 to this computer: firmware, sounds, patterns and settings. "
                        "Put it back later if anything goes wrong.",
@@ -825,6 +825,72 @@ STOCK_WHY = ("This puts M-VAVE's original start-up program (bootloader) back, ta
              "before Protect my FM-1. Your firmware, sounds, patterns and settings stay.",
              "Afterwards, holding REC no longer opens update mode. (An official M-VAVE update does the same.)",
              "What is on the FM-1 now is backed up first.")
+
+
+START_INTRO = ("Just got an FM-1 and new to all this? Do these three things, in this order. Each one tells "
+               "you what to do. You can close this window and come back any time: it remembers how far "
+               "you got.")
+START_STEPS = (
+    ("backup", "Make a backup",
+     "Copies everything on your FM-1 to this computer: its firmware, sounds, patterns and settings. "
+     "Whatever happens later, this puts it back exactly as it is today. Nothing on the FM-1 is changed. "
+     "Afterwards, copy the backup files somewhere else too (a USB stick, a cloud folder).",
+     "Back up now…"),
+    ("protect", "Give it a spare key",
+     "This is the one step that writes to the FM-1: only its tiny start-up program, in a few seconds. "
+     "Afterwards, holding REC while you switch it on always lets new firmware go on, even if a firmware "
+     "breaks. Use a cable straight into the computer (no hub), and charge the FM-1 first. You can skip "
+     "this, but then a broken firmware is much harder to fix.",
+     "Protect…"),
+    ("firmware", "Put on a firmware",
+     "Now you can try any FM-1 firmware. Pick one in the list and press Install. Don't like it? Install "
+     "another one, or put your backup back. If the FM-1 ever stops starting, hold REC while you switch it "
+     "on, then install again.",
+     "Choose firmware…"))
+HUB_PAGE = "https://thefirmwarehub.com"
+HUB_LINK = "Where to find firmwares: The Firmware Hub, thefirmwarehub.com"
+# the one place a firmware is named on its own: a tip from the app's maker, labelled as such
+MAKER_TIP = "From the maker of FM-1 Switch: Wild, great if you like dark techno."
+MAKER_TIP_URL = None                                   # (the Patreon post, once given)
+START_AFTER = ("After a backup or Protect the FM-1's screen stays dark (update mode). Switch it off, wait 10 "
+               "seconds and switch it on: then it starts as usual.")
+START_DONE = "All three done. Have fun! (This window stays here if you want to look again.)"
+
+
+def start_state(d):
+    """the Start here guide's progress, from what is really there: a backup with its checksum, the
+    FM-1 protected (or the step skipped), a firmware installed from here -> {step: True/False/"skipped"}"""
+    try:
+        seen = json.loads((Path(d) / "start-here.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    seen = seen if isinstance(seen, dict) else {}
+    out = {"backup": bool(backups(d)),
+           "protect": True if protection(d) == "protected" else "skipped" if seen.get("protect") == "skipped"
+           else False,
+           "firmware": bool(seen.get("firmware"))}
+    return out
+
+
+def start_mark(d, step, value=True):
+    try:
+        f = Path(d) / "start-here.json"
+        try:
+            seen = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            seen = {}
+        seen[step] = value
+        f.write_text(json.dumps(seen), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def start_next(st):
+    """the first step not done (a skipped Protect counts as done), or None"""
+    for k, *_ in START_STEPS:
+        if not st.get(k):
+            return k
+    return None
 
 
 def rec_step(st, present):
@@ -856,8 +922,8 @@ BACKUPS_HELP = ("A backup is a full copy of everything on the FM-1, saved on thi
                 "yourself: they hold your FM-1's own data.")
 
 PROTECTION_TEXT = {"protected": "Protected: if anything goes wrong, hold REC while you switch it on.",
-                   "not": "Not protected yet. Start with Protect my FM-1.",
-                   None: "Not known yet if it is protected. Start with Protect my FM-1."}
+                   "not": "Not protected yet. New here? Press Start here.",
+                   None: "Not known yet if it is protected. New here? Press Start here."}
 
 
 def open_folder(d):
@@ -1047,7 +1113,7 @@ def main():
         tone["value"] = t
         dot.itemconfigure(dot_id, fill=C.get(t, C["off"]))
 
-    # the start screen: four tasks, the first marked step 1 until the FM-1 is protected
+    # the start screen: four tasks, Protect marked recommended until the FM-1 is protected
     adv = ttk.Frame(top)                        # (packed from the bottom: the tasks take what is left)
     adv.pack(side="bottom", fill="x", pady=(px(10), 0))
     bar = ttk.Progressbar(top, maximum=100)
@@ -1057,7 +1123,7 @@ def main():
     tasks.pack(fill="both", expand=True)
     tasks.columnconfigure((0, 1), weight=1, uniform="t")
     tasks.rowconfigure((0, 1), weight=1, uniform="t")
-    badge = tk.StringVar(value="STEP 1")
+    badge = tk.StringVar(value="RECOMMENDED")
 
     def tile(r, c, title, text, button, command, var=None):
         t = ttk.Frame(tasks, style="Card.TFrame", padding=(px(14), px(12)))
@@ -1081,7 +1147,7 @@ def main():
     def show_protection():
         p = protection(rescue_dir())
         prot_var.set(PROTECTION_TEXT[p])
-        badge.set("" if p == "protected" else "STEP 1")
+        badge.set("" if p == "protected" else "RECOMMENDED")
         pb_.configure(style="TButton" if p == "protected" else "Accent.TButton")
 
     # Install firmware: its own window, made once and shown when asked (the list keeps its files)
@@ -2058,6 +2124,7 @@ def main():
             elif kind == "done":
                 ui(bar.configure, value=100)
                 ui(dev_var.set, f"FM-1: runs {value}")
+                start_mark(rescue_dir(), "firmware")
                 ui(set_tone, "ok")
 
         def work():
@@ -2092,9 +2159,78 @@ def main():
     ib.pack(side="right")
     rb.pack(side="right", padx=(0, px(8)))
     stop_b = ttk.Button(card_btns, text="Stop", command=stop_rescue)
+
+    def open_start():
+        """Start here: the three first things, in order, each ticked from what is really there"""
+        d = rescue_dir()
+        w = dialog("FM-1 Switch – Start here", 640, 740)
+        f = ttk.Frame(w, padding=(px(20), px(16)))
+        f.pack(fill="both", expand=True)
+        wrap = px(580)
+        ttk.Label(f, text="Start here", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(f, text=START_INTRO, wraplength=wrap, justify="left").pack(anchor="w", pady=(px(4), px(10)))
+        rows = {}
+        acts = {"backup": do_inspect, "protect": lambda: open_protect(),
+                "firmware": lambda: show_install()}
+        for i, (k, title, text, button) in enumerate(START_STEPS, 1):
+            c = ttk.Frame(f, style="Card.TFrame", padding=(px(14), px(10)))
+            c.pack(fill="x", pady=(0, px(8)))
+            mark = tk.StringVar()
+            top_ = tk.Frame(c, background=C["card"])
+            top_.pack(fill="x")
+            ttk.Label(top_, textvariable=mark, style="Badge.TLabel").pack(side="left")
+            ttk.Label(top_, text=f"  {i}. {title}", style="Head.TLabel").pack(side="left")
+            ttk.Label(c, text=text, style="Muted.TLabel", wraplength=wrap - px(30), justify="left").pack(
+                anchor="w", pady=(px(4), px(6)))
+            br = tk.Frame(c, background=C["card"])
+            br.pack(fill="x")
+            b = ttk.Button(br, text=button, command=acts[k])
+            b.pack(side="left")
+            extra = None
+            if k == "backup":
+                extra = ttk.Button(br, text="Open the backup folder", command=lambda: open_folder(d))
+            elif k == "protect":
+                extra = ttk.Button(br, text="Skip this step", command=lambda: (start_mark(d, "protect", "skipped"),
+                                                                              refresh()))
+            if extra is not None:
+                extra.pack(side="left", padx=(px(8), 0))
+            if k == "firmware":
+                for t, url in ((HUB_LINK, HUB_PAGE), (MAKER_TIP, MAKER_TIP_URL)):
+                    lk = ttk.Label(c, text=t, style="Muted.TLabel", wraplength=wrap - px(30), justify="left",
+                                   **({"foreground": C["accent"], "cursor": "hand2"} if url else {}))
+                    lk.pack(anchor="w", pady=(px(6), 0))
+                    if url:
+                        lk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            rows[k] = (mark, b)
+        ttk.Label(f, text=START_AFTER, style="Muted.TLabel", wraplength=wrap, justify="left").pack(anchor="w")
+        done_var = tk.StringVar()
+        ttk.Label(f, textvariable=done_var, style="Head.TLabel", wraplength=wrap).pack(anchor="w", pady=(px(8), 0))
+        ttk.Button(f, text="Close", command=w.destroy).pack(side="bottom", anchor="e")
+
+        def refresh():
+            if not w.winfo_exists():
+                return
+            st = start_state(d)
+            nxt = start_next(st)
+            for i, (k, *_) in enumerate(START_STEPS):
+                mark, b = rows[k]
+                mark.set({True: "✓ DONE", "skipped": "SKIPPED"}.get(st[k], "NEXT" if k == nxt else ""))
+                b.configure(style="Accent.TButton" if k == nxt else "TButton")
+            done_var.set(START_DONE if nxt is None else "")
+            start_b.configure(style="TButton" if nxt is None else "Accent.TButton")
+        def tick():
+            if w.winfo_exists():
+                refresh()
+                w.after(2000, tick)
+        tick()
+
+    start_b = ttk.Button(head, text="Start here", style="Accent.TButton", command=open_start)
     ttk.Button(head, text="About", command=lambda: messagebox.showinfo(
         "About FM-1 Switch", f"FM-1 Switch {app_version()}\n\n" + DISCLAIMER
         + "\n\nSource and licence: github.com/Saintpid/FM1-Switch (GPL-3.0)")).pack(side="right")
+    start_b.pack(side="right", padx=(0, px(8)))
+    if start_next(start_state(rescue_dir())) is None:
+        start_b.configure(style="TButton")
 
     def closing():
         if state["busy"]:
