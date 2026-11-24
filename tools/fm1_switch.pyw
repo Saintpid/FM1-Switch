@@ -1336,6 +1336,7 @@ def main():
         """Rescue: 1 choose the firmware to put back, 2 accept the risk, 3 run it"""
         if state["busy"]:
             return
+        inst.withdraw()                 # (its own window has its own list)
         d = rescue_dir()
         choices = rescue_choices(folders + [d])
         w = dialog("FM-1 Switch – Through update mode" + (", with the adapter (experimental)" if via != "usb" else ""),
@@ -2147,6 +2148,7 @@ def main():
         if not messagebox.askyesno("FM-1 Switch", f"Install {pkg.path.name} ({pkg.product})?\n\n"
                                                   "Keep the cable in until it is done."):
             return
+        inst.withdraw()                 # the list has done its job: the main window shows the progress
         busy(True)
         bar["value"] = 0
 

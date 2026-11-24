@@ -2,6 +2,12 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.9
+
+- **The firmware list goes away when you press Install.** Once you have said yes, its window
+  closes and the main window shows how the install is going. Through update mode… closes it too.
+- **Start here on Windows:** a Protect made just before Start over no longer counts for the next FM-1.
+
 ## 1.5.8
 
 - **Ready for the Mac build.** The shared Mac packaging code is updated to its current version, and

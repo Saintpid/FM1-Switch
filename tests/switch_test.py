@@ -429,5 +429,10 @@ ok(not so["backup"] and not so["protect"] and not so["firmware"],
 ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker") and "patreon.com" in S.MAKER_TIP_URL,
    "start here: the hub linked, the one firmware tip labelled as the maker's")
 
+_main_src = Path(S.__file__).read_text(encoding="utf-8")
+_inst = _main_src[_main_src.index("    def do_install():"):_main_src.index("        busy(True)", _main_src.index("    def do_install():"))]
+ok("inst.withdraw()" in _inst and _inst.rindex("inst.withdraw()") > _inst.rindex("askyesno"),
+   "install: the firmware list closes once Install is confirmed")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)
