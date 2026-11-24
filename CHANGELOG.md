@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.6
+
+- **Putting a backup back after a cut-off write, made clearer.** Its steps no longer ask you to
+  switch the FM-1 on and let its firmware start (it waits in update mode, and that is what is
+  needed), a Put back that was itself cut off offers the same backup again, not the half-written
+  copy, and a helper that stops while writing is no longer reported as "nothing changed".
+
 ## 1.5.5
 
 - **If Protect is cut off halfway, the way back is one button.** Running Protect again would be

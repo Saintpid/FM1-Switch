@@ -1393,7 +1393,7 @@ def main():
         stock.pack(side="right", padx=(0, px(8)))
         fill()
 
-    def open_protect(mode="protect", backup=None):
+    def open_protect(mode="protect", backup=None, stuck=False):
         """Protect my FM-1 in seven screens: why, connect, update mode, backup, check and confirm, writing,
         try REC. The helper (fm1_rescue.py --protect --ask) backs up and plans; it writes only after Install.
         The same screens put a backup back (mode "restore") or M-VAVE's bootloader from one ("stock")."""
@@ -1487,7 +1487,11 @@ def main():
         def connect():
             r = clear("connect")
             heading(2, "Connect your FM-1")
-            for i, t in enumerate(("Plug the FM-1 straight into this computer (no hub).",
+            for i, t in enumerate(("Keep the cable in.",
+                                   "Leave the FM-1 as it is, switched on, with its screen dark: it is waiting in "
+                                   "update mode, which is what is needed now.",
+                                   "Close music programs or web editors that might be talking to it.") if stuck else
+                                  ("Plug the FM-1 straight into this computer (no hub).",
                                    "Switch it on and let your usual firmware start.",
                                    "Close music programs or web editors that might be talking to it."), 1):
                 text(f"{i}. {t}", pady=(0, px(4)))
@@ -1684,8 +1688,11 @@ def main():
             if wrote and "put back as it was" not in msg and live["backup"]:
                 # half written: only the backup from just before brings it back (running it again is
                 # refused: the boot area is no longer whole); that backup, not the newest in the list
+                # (putting a backup back that was cut off: that same backup again, not the half-written copy
+                # just saved)
+                again = backup if mode == "restore" and backup else live["backup"]
                 ttk.Button(r, text="Put this backup back", style="Accent.TButton",
-                           command=lambda b=live["backup"]: (close(), open_protect("restore", b))).pack(side="right")
+                           command=lambda b=again: (close(), open_protect("restore", b, stuck=True))).pack(side="right")
             else:
                 ttk.Button(r, text="Try again", style="Accent.TButton", command=connect).pack(side="right")
             ttk.Button(r, text="Close", command=close).pack(side="right", padx=(0, px(8)))
@@ -1755,7 +1762,8 @@ def main():
             if not live["open"]:
                 return
             if end is None:
-                failed("It did not start: administrator access was not given.", False)
+                failed("It stopped without saying why." if wrote else
+                       "It did not start: the computer's permission was not given.", wrote)
             elif end.get("end") == "ok":
                 failed("It stopped before writing.", False)
             else:
