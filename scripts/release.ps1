@@ -56,9 +56,12 @@ function Find-Python312 {
         $was = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'      # (a native program's error output would stop the script)
         $more = @($c | Select-Object -Skip 1)
-        try { $out = & $c[0] $more -c $ask 2>$null | Select-Object -First 1 } catch { $out = $null }
+        # (all of its output, then the first line: Select-Object -First 1 would stop it early and leave a
+        # false exit code behind, which is what made 1.5.12's first try say 3.12 was missing)
+        try { $out = @(& $c[0] $more -c $ask 2>$null) } catch { $out = @() }
         $ErrorActionPreference = $was
-        if ($out -and $out.Trim() -and (Test-Path -LiteralPath $out.Trim())) { return $out.Trim() }
+        $first = if ($out.Count) { ([string]$out[0]).Trim() } else { '' }
+        if ($first -and (Test-Path -LiteralPath $first)) { return $first }
     }
     throw ('Python 3.12 was not found (install it from python.org, or pass -Python). Tried: ' +
            $(if ($tried) { $tried -join '; ' } else { 'nothing: no py launcher, no python on PATH' }))
