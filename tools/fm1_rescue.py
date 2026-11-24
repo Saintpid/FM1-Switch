@@ -265,6 +265,19 @@ class Uboot:
             raise Refused(f"command {cmd:04X} answered as {r[0:2].hex()}")
         return r[2:]
 
+    def query(self, cmd, args=b"", tries=3, pause=0.3):
+        """a command that only asks (it changes nothing), tried again after a passing USB/Windows error;
+        a refusal is an answer and is not"""
+        for attempt in range(tries):
+            try:
+                return self.cmd(cmd, args)
+            except Refused:
+                raise
+            except Fail:
+                if attempt == tries - 1:
+                    raise
+                time.sleep(pause)
+
     def write_block(self, cmd, addr, data):
         args = struct.pack(">IH", addr, len(data)) + b"\0" + struct.pack("<H", crc16(data))
         self.bot.xfer(cdb_for(cmd, args), data_out=data)
@@ -280,7 +293,7 @@ class Uboot:
     def identify(self):
         """(version, RAM address) of an MFLR loader that answers, else None"""
         try:
-            r = self.cmd(CMD_MFLR_IDENTIFY)
+            r = self.query(CMD_MFLR_IDENTIFY)
         except Refused:
             return None
         if r[:4] != b"MFLR":
@@ -291,7 +304,7 @@ class Uboot:
         running = self.identify()
         if running is None:
             try:
-                self.cmd(CMD_GET_ONLINE_DEVICE)
+                self.query(CMD_GET_ONLINE_DEVICE)
                 other = True
             except Refused:
                 other = False
@@ -390,7 +403,7 @@ class Uboot:
         k = bytearray([p[5], p[4]])
         crc_cipher(k)
         key = k[0] | k[1] << 8
-        p = self.cmd(CMD_GET_ONLINE_DEVICE)
+        p = self.query(CMD_GET_ONLINE_DEVICE)
         return key, p[0], struct.unpack_from("<I", p, 2)[0]
 
     def read(self, addr, n):
@@ -1025,7 +1038,7 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
 
 
 def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
-            allow_ucun=False):
+            allow_ucun=False, again=None):
     """Protect my FM-1: m-bootloader in the boot area. A full verified backup first; the new boot area is
     built over the FM-1's own (its chip-key record kept), must pass the bootable check, and nothing outside
     the 16 KiB boot area may change. -> "installed", "already" or False (checked, nothing written)"""
@@ -1076,17 +1089,12 @@ def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=
         # the sector with the flash header and the file table last. A cut before the last sector still
         # leaves a boot area that cannot start (the old table points at a half-replaced bootloader): the
         # FM-1 then needs update mode from the ROM or the adapter, and the backup put back (restore())
-        # If a sector will not write, the boot sectors already changed are written back from the backup
-        # read moments ago, in the same session (the loader resets the chip after ~3 s without commands).
-        write_sectors(dev, now, new, sorted(diff, reverse=True), say, step)
+        # If a sector will not write, or the final read differs, every sector changed is written back from
+        # the backup read moments ago, in the same session (the loader resets the chip after ~3 s without
+        # commands).
+        write_sectors(dev, now, new, sorted(diff, reverse=True), say, step, again)
     finally:
         dev.boot_write = False
-    say("  final read ...")
-    final = dev.read(0, FLASH_SIZE)
-    if final != new or dev.crc32(0, FLASH_SIZE) not in (None, crc32(new)):
-        bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != new[a:a + SECTOR]]
-        raise Fail("final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad)
-                   + "; the FM-1 is still in update mode: restore the backup")
     dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
     dev.show(12, " RESTARTING")
     say(f"  the rescue bootloader {version} is installed and verified. Restarting the FM-1 ...")
@@ -1124,7 +1132,7 @@ def read_backup(path):
 
 
 def restore(dev, backup, loader, write, backup_dir, say=print, confirm=None, step=None, owner=None,
-            allow_ucun=False, meta=None, boot_only=False):
+            allow_ucun=False, meta=None, boot_only=False, again=None):
     """Put this FM-1's own backup back, boot area included (boot_only: the boot area alone, for M-VAVE's
     bootloader from a backup made before Protect). A fresh full verified backup first; the backup must be
     this same FM-1's (its key and MAC, and its unique ID when both have one), must start it
@@ -1183,15 +1191,9 @@ def restore(dev, backup, loader, write, backup_dir, say=print, confirm=None, ste
     order = sorted((a for a in diff if a >= WRITE_MIN), reverse=True) + sorted(boot, reverse=True)
     dev.full_write = dev.boot_write = True
     try:
-        write_sectors(dev, now, new, order, say, step)
+        write_sectors(dev, now, new, order, say, step, again)
     finally:
         dev.full_write = dev.boot_write = False
-    say("  final read ...")
-    final = dev.read(0, FLASH_SIZE)
-    if final != new or dev.crc32(0, FLASH_SIZE) not in (None, crc32(new)):
-        bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != new[a:a + SECTOR]]
-        raise Fail("final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad)
-                   + "; the FM-1 is still in update mode: put the backup back again")
     dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
     dev.show(12, " RESTARTING")
     say("  the backup is back and verified. Restarting the FM-1 ...")
@@ -1212,35 +1214,74 @@ def _put(dev, a, data, tries=3, pause=0.3):
             time.sleep(pause)
 
 
-def write_sectors(dev, now, new, order, say=print, step=None):
-    """new's sectors in this order (boot ones last). If one will not write, every boot sector already
-    touched is written back from now at once, while the loader still runs: the FM-1 is left with the boot
-    area it had, and says so; only if that fails too is it left in update mode to be put back"""
+def write_sectors(dev, now, new, order, say=print, step=None, again=None):
+    """new's sectors in this order (boot ones last), then the whole flash read back and checked. If
+    anything goes wrong (a sector, the link, the final read), every sector touched is written back from
+    now (the backup read moments ago) in the same session, while the loader still runs (it resets the
+    chip after ~3 s without commands): the FM-1 is then exactly as before, and says so. If that does not
+    finish either, again() (the window's "Try again", the loader kept busy meanwhile) may try once more"""
     step = step or (lambda *a: None)
-    done = []
-    for i, a in enumerate(order):
-        try:
+    touched = []
+    try:
+        for i, a in enumerate(order):
+            touched.append(a)
             _put(dev, a, new[a:a + SECTOR])
-        except Fail as e:
-            back = [b for b in done + [a] if b < WRITE_MIN]
-            if not back:
-                raise Fail(f"{e}; the boot area was not touched: the FM-1 starts as before. Run it again to "
-                           "finish") from None
-            say(f"  sector {a:#07x} will not write ({e}); putting the boot area back as it was ...")
+            step("write", (i + 1) * 100 // len(order))
+            dev.show(bar=(i + 1) * 100 // len(order), color=SCREEN_MINT)
+        say("  final read ...")
+        final = dev.read(0, FLASH_SIZE)
+        if final != new or dev.crc32(0, FLASH_SIZE) not in (None, crc32(new)):
+            bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != new[a:a + SECTOR]]
+            touched = sorted(set(touched) | set(bad))
+            raise Fail("the final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad))
+    except Exception as e:
+        why = str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"
+        say(f"  {why}; putting back everything written, as it was ...")
+        dev.show(5, " PUTTING IT BACK", SCREEN_AMBER)
+        left = put_back(dev, now, touched, say)
+        while left and again is not None:
+            step("putback_failed", {"sectors": left})
+            if not keep_alive(dev, again):
+                break
+            left = put_back(dev, now, left, say)
+        if not left:
+            raise Fail(f"{why}; everything written was put back as it was and checked: the FM-1 starts as "
+                       "before") from None
+        raise Fail(f"{why}; {len(left)} sector{'s' if len(left) > 1 else ''} could not be put back "
+                   f"({' '.join(f'{a:#07x}' for a in left)}): put the backup back (Back up my FM-1 > "
+                   "Put back…). If the FM-1 does not start, see My FM-1 won't start") from None
+
+
+def put_back(dev, now, sectors, say=print, rounds=4):
+    """these sectors written back from now: the boot area first (header sector last), every one tried in
+    each round, the loader kept busy between rounds; then read back. -> the sectors that still differ"""
+    left = sorted((a for a in set(sectors) if a < WRITE_MIN), reverse=True) \
+        + sorted((a for a in set(sectors) if a >= WRITE_MIN), reverse=True)
+    for r in range(rounds):
+        failed = []
+        for a in left:
             try:
-                for b in sorted(back, reverse=True):
-                    _put(dev, b, now[b:b + SECTOR], tries=5)
-                ok = dev.read(0, WRITE_MIN) == now[:WRITE_MIN]
+                _put(dev, a, now[a:a + SECTOR], tries=3)
             except Exception:
-                ok = False
-            if ok:
-                raise Fail(f"{e}; the boot area was put back as it was and checked: the FM-1 starts as "
-                           "before") from None
-            raise Fail(f"{e}; the boot area could not be put back: do not switch the FM-1 off, keep it "
-                       "connected, and put the backup back (Back up my FM-1 > Put back…)") from None
-        done.append(a)
-        step("write", (i + 1) * 100 // len(order))
-        dev.show(bar=(i + 1) * 100 // len(order), color=SCREEN_MINT)
+                failed.append(a)
+        left = failed
+        if not left:
+            break
+        say(f"  {len(left)} sector(s) would not write back; trying them again ...")
+        for _ in range(3):
+            time.sleep(0.5)
+            try:
+                dev.cmd(CMD_GET_ONLINE_DEVICE)
+            except Exception:
+                pass
+    bad = []
+    for a in sorted(set(sectors)):
+        try:
+            if dev.read(a, SECTOR) != now[a:a + SECTOR]:
+                bad.append(a)
+        except Exception:
+            bad.append(a)
+    return bad
 
 
 def keep_alive(dev, confirm):
@@ -1625,8 +1666,8 @@ def release(t):
         pass
 
 
-def ask(what="put the stock firmware back"):
-    print("\n  Everything checks out, and the backup is saved.")
+def ask(what="put the stock firmware back", head="Everything checks out, and the backup is saved."):
+    print(f"\n  {head}")
     try:
         return input(f"  Type yes and press Return to {what}: ").strip().lower() == "yes"
     except EOFError:
@@ -1816,13 +1857,17 @@ def main(argv=None):
                 if via == "transporter":
                     dev.ensure_uboot(args.wait, say, stop)
                 details = {}
+                # putting it back did not finish: the window's Try again (or a yes here) tries once more
+                again = pf.answer if pf else (lambda: ask("try putting it back again", "Putting it back did not "
+                                                          "finish. Keep the FM-1 connected.")) if args.ask else None
                 if args.restore:
                     confirm = None
                     if args.ask:
                         confirm = pf.answer if pf else (lambda: ask("put the backup back"))
                     result = restore(dev, saved, loader, args.write, backup_dir, say=say, confirm=confirm,
                                      step=pf.step if pf else None, owner=owner,
-                                     allow_ucun=args.allow_ucun_write, meta=meta, boot_only=args.boot_only)
+                                     allow_ucun=args.allow_ucun_write, meta=meta, boot_only=args.boot_only,
+                                     again=again)
                     details = {"result": result or "checked"}
                 elif args.protect:
                     confirm = None
@@ -1830,7 +1875,7 @@ def main(argv=None):
                         confirm = pf.answer if pf else (lambda: ask("install the rescue bootloader"))
                     result = protect(dev, boot, loader, args.write, backup_dir, say=say,
                                      confirm=confirm, step=pf.step if pf else None,
-                                     owner=owner, allow_ucun=args.allow_ucun_write)
+                                     owner=owner, allow_ucun=args.allow_ucun_write, again=again)
                     details = {"result": result or "checked", "version": MBOOT_VERSION}
                 elif args.inspect:
                     _, info, path = inspect_backup(dev, loader, backup_dir, say=say,
@@ -1851,8 +1896,10 @@ def main(argv=None):
             except Exception as e:                           # (a USB error: it dropped out)
                 say(f"  attempt {attempt}: {e}")
                 if (args.protect or args.restore) and getattr(dev, "wrote", False):
-                    raise Fail(f"{e}; writing had begun, so it is not tried again by itself: keep the FM-1 "
-                               "connected and switched on, and run it again (or put the backup back)")
+                    if "put back as it was" in str(e) or "could not be put back" in str(e):
+                        raise                                # (it says already what the FM-1 holds)
+                    raise Fail(f"{e}; writing had begun, so it is not tried again by itself: put the backup "
+                               "back (Back up my FM-1 > Put back…)")
                 if attempt < args.tries:
                     time.sleep(1.5)                          # (Windows may still be setting the disk up)
                 if isinstance(e, Fail) and ("not writing" in str(e) or "not the FM-1" in str(e)

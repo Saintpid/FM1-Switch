@@ -773,6 +773,10 @@ PROTECT_FAIL_WRITTEN = ("Do not switch the FM-1 off. Keep it connected: it stays
                         "my FM-1 again, which writes the boot area again from the start. Your full backup "
                         "is saved here:")
 
+PUTBACK_FAILED = ("Something went wrong while writing, and {n} sector{s} would not go back as before. Keep the "
+                  "cable in and the FM-1 switched on: it is kept in update mode while this page is open. Check "
+                  "the cable (no hub), then try again.")
+
 TASK_TEXT = {"protect": "Install the rescue bootloader, so the FM-1 can always be reached: hold REC while "
                         "you switch it on. A full backup is saved first.",
              "install": "Put Wild, NB303, Felucca or another FM-1 firmware on it, over USB.",
@@ -1549,6 +1553,25 @@ def main():
             live["bar"] = pb
             text("", style="Muted.TLabel", var=say)
 
+        def putback_failed(v):
+            r = clear("putback")
+            heading(None, "Putting it back did not finish")
+            n = len((v or {}).get("sectors") or [])
+            text(PUTBACK_FAILED.format(n=n, s="s" if n != 1 else ""))
+
+            def again():
+                R.answer(live["prog"])
+                clear("write")
+                heading(None, "Putting it back again")
+                text("Do not unplug the cable or switch the FM-1 off.")
+                text("", style="Muted.TLabel", var=say)
+
+            def give_up():
+                open(live["prog"] + ".stop", "w").close()
+                say.set("Stopping…")
+            ttk.Button(r, text="Try again", style="Accent.TButton", command=again).pack(side="right")
+            ttk.Button(r, text="Stop trying", command=give_up).pack(side="right", padx=(0, px(8)))
+
         def try_rec(version, new):
             r = clear("rec")
             heading(7, "Try it: hold REC")
@@ -1608,7 +1631,7 @@ def main():
             r = clear("failed")
             heading(None, F["title"] + " did not finish")
             text(msg)
-            if wrote and ("put back as it was" in msg or "was not touched" in msg):
+            if wrote and "put back as it was" in msg:
                 text("Switch the FM-1 off and on: it starts as before. You can try again.", pady=(px(10), 0))
             elif wrote:
                 text(PROTECT_FAIL_WRITTEN.replace("Run Protect my FM-1 again, which writes the boot area",
@@ -1650,6 +1673,8 @@ def main():
                     live["backup"] = v
             elif s == "plan":
                 review(v)
+            elif s == "putback_failed":
+                putback_failed(v)
             elif s == "write" and live["page"] == "write":
                 live["bar"].configure(value=v)
                 say.set(PROTECT_STEP["write"].format(v))

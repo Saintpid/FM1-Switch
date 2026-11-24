@@ -964,13 +964,25 @@ except R.Fail:
 d = FakeMflr(base)
 up3 = R.Uboot(d)
 real = up3._program
-up3._program = lambda a, data: (_ for _ in ()).throw(R.Fail("sector did not verify")) if a == 0 else real(a, data)
-try:
-    R.protect(up3, MB, MFLR, True, tmp, say=quiet)
-    ok(False, "protect: a sector that will not verify stops it, the permission closed")
-except R.Fail as e:
-    ok("could not be put back" in str(e) and up3.boot_write is False,
-       "protect: a sector that will never write: it says the boot area must be put back, the permission closed")
+
+
+def _half(a, data):                                    # sector 0 erased, then it never writes again
+    if a == 0:
+        up3.wrote = True
+        d.flash[0:R.SECTOR] = b"\xFF" * R.SECTOR
+        raise R.Fail("sector did not verify")
+    real(a, data)
+
+
+up3._program = _half
+with patch("time.sleep"):
+    try:
+        R.protect(up3, MB, MFLR, True, tmp, say=quiet)
+        ok(False, "protect: a sector that will not verify stops it, the permission closed")
+    except R.Fail as e:
+        ok("1 sector could not be put back (0x00000)" in str(e) and "Put back" in str(e)
+           and up3.boot_write is False and bytes(d.flash[R.SECTOR:R.WRITE_MIN]) == base[R.SECTOR:R.WRITE_MIN],
+           "protect: a sector that will never write: the others are put back, it names the one left")
 d = FakeMflr(base)
 up6 = R.Uboot(d)
 real6 = up6._program
@@ -1079,6 +1091,87 @@ try:
     ok(False, "restore: never the key and MAC sector")
 except R.Fail:
     ok(True, "restore: never the key and MAC sector")
+# ---- something going wrong while it writes: everything written goes back, in the same session
+def failing_restore(fail_at, final_bad=False, again=None, stuck=()):
+    d = FakeMflr(bytes(changed))
+    up = R.Uboot(d)
+    real_p = R.Uboot._program
+    left = {"stuck": set(stuck)}
+
+    def prog(a, data):
+        if a == fail_at and data == saved[a:a + R.SECTOR]:
+            up.wrote = True
+            d.flash[a:a + R.SECTOR] = b"\xFF" * R.SECTOR   # erased, then cut
+            raise R.Fail("sector did not verify")
+        if a in left["stuck"] and data == bytes(changed)[a:a + R.SECTOR]:
+            raise R.Fail("still will not write")       # (putting it back)
+        real_p(up, a, data)
+    up._program = prog
+    st = []
+    real_read = up.read
+    if final_bad:
+        once = {"n": 0}
+
+        def read(a, n):
+            got = real_read(a, n)
+            if n == R.FLASH_SIZE and once["n"] == 2:   # (after the backup's two whole reads)
+                got = bytearray(got)
+                got[0x60000] ^= 0xFF
+                got = bytes(got)
+            once["n"] += n == R.FLASH_SIZE
+            return got
+        up.read = read
+    try:
+        with patch("time.sleep"):
+            r = R.restore(up, saved, MFLR, True, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)),
+                          again=again)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+r, d, up, _ = failing_restore(0xC0000)
+ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) == bytes(changed)
+   and not d.ran, "put back: a firmware/data sector that fails: everything written goes back, as before")
+r, d, up, _ = failing_restore(0x1000)
+ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) == bytes(changed),
+   "put back: a boot sector that fails: the firmware and data written go back as well")
+r, d, up, _ = failing_restore(None, final_bad=True)
+ok(isinstance(r, R.Fail) and "final read differs" in str(r) and "put back as it was" in str(r)
+   and bytes(d.flash) == bytes(changed), "put back: a final read that differs: everything goes back too")
+asked = []
+r, d, up, st = failing_restore(0x50000, again=lambda: asked.append(1) or (len(asked) < 2),
+                               stuck=(0x50000,))
+ok(isinstance(r, R.Fail) and "could not be put back (0x50000)" in str(r) and len(asked) == 2
+   and [v for k, v in st if k == "putback_failed"][0] == {"sectors": [0x50000]}
+   and bytes(d.flash[0xC0000:0xC1000]) == bytes(changed)[0xC0000:0xC1000],
+   "put back: every sector is tried, the one left is named, the window is asked to try again")
+
+
+class Flaky(FakeMflr):                                 # a passing Windows error, then answers
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.bad = 2
+
+    def xfer(self, cdb, data_out=None, n_in=0, timeout=5000):
+        if struct.unpack(">H", bytes(cdb[:2]))[0] in (R.CMD_MFLR_IDENTIFY, R.CMD_GET_ONLINE_DEVICE) and self.bad:
+            self.bad -= 1
+            raise R.Fail("Windows error 31 (command fc0a)")
+        return super().xfer(cdb, data_out, n_in, timeout)
+
+
+with patch("time.sleep"):
+    fl = R.Uboot(Flaky(base))
+    fl.bot.mode = "loader"
+    ok(len(fl.query(R.CMD_GET_ONLINE_DEVICE)) > 4, "query: a passing USB/Windows error is asked again")
+    fl = R.Uboot(Flaky(base))
+    fl.bot.mode, fl.bot.bad = "loader", 5
+    try:
+        fl.query(R.CMD_GET_ONLINE_DEVICE)
+        ok(False, "query: an error that stays is reported")
+    except R.Fail:
+        ok(True, "query: an error that stays is reported")
+
 bdir = Path(tempfile.mkdtemp())
 bf = bdir / "fm1-backup-x.bin"
 bf.write_bytes(saved)
