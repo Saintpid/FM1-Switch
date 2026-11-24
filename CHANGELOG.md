@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.4
+
+- **Safer advice when writing stopped halfway.** The window now says to leave the FM-1 switched on
+  and try again (or put the backup back) right away, while it still waits in update mode, and to
+  switch it off only if FM-1 Switch cannot find it. The REC test points to the window's tick, since a
+  dark screen alone does not prove it.
+
 ## 1.5.3
 
 - **Plain words everywhere.** Every screen was rewritten so you do not need to know what a

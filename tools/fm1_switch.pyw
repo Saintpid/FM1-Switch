@@ -632,7 +632,9 @@ def protect_args(d, progress, mode="protect", backup=None):
 
 PROTECT_WHY = ("Think of it as a spare key. When the FM-1 starts, a tiny start-up program (the "
                "bootloader) runs first. This replaces M-VAVE's with one that has a way in: hold REC while you "
-               "switch the FM-1 on, and it is ready for new firmware, even if the firmware is broken.",
+               "switch the FM-1 on, and it is ready for new firmware, even if the firmware is broken. (Only "
+               "a damaged start-up program itself, for example from a power cut while writing it, would "
+               "need more help.)",
                "If a firmware is damaged, the new start-up program does not run it. The FM-1 waits for a new "
                "one instead of getting stuck.",
                "Only that start-up program changes: a tiny part at the start of the memory. Your firmware, "
@@ -644,7 +646,8 @@ MBOOT_PAGE = "https://github.com/jvitkauskas/m-bootloader"
 PROTECT_TICK = "I will keep the cable in and the FM-1 switched on for the next 10 seconds."
 UCUN_NOTE = ("This FM-1 has the newer memory chip (UCUN). Writing to it is still new here. One early FM-1 "
              "with this chip did not start after an old version of the start-up program (cause unknown); "
-             "many have worked since. Your backup can put everything back.")
+             "many have worked since. As long as the FM-1 can reach update mode, your backup can put "
+             "everything back.")
 PROTECT_STEP = {"ready": "Thanks. Putting the FM-1 into update mode (its screen goes dark)…",
                 "hardware": "Found the FM-1. Copying its memory…",
                 "backup_read": "Copying the FM-1's memory ({} of 2)…",
@@ -768,27 +771,29 @@ def map_legend(regions):
 
 REC_STEPS = ("Switch the FM-1 off. (If its screen still says RESTARTING, that is fine: it does not always "
              "restart by itself.)",
-             "Hold REC and switch it on. The screen stays dark: that means it worked, the FM-1 is in update "
-             "mode. Let go of REC after a few seconds.",
+             "Hold REC and switch it on. The screen stays dark: that is how update mode looks. This window "
+             "shows a tick when it sees the FM-1 there. Then let go of REC.",
              "Switch it off, wait 10 seconds and switch it on without holding anything. Your firmware starts "
              "as usual.")
 REC_NOTE = ("Want to see it on the FM-1's own screen? Hold PLAY instead of REC while you switch it on: a menu "
             "appears (M-VAVE's original start-up program has none). Choose Boot app, or switch it off and on.")
-PROTECT_FAIL_WRITTEN = ("Keep the cable in. Switch the FM-1 off, wait 10 seconds and switch it on. If it starts, "
-                        "run Protect my FM-1 again: it starts over from the beginning. If the screen stays "
-                        "dark, open Back up my FM-1 > Put back… or My FM-1 won't start. Your full backup is "
-                        "saved here:")
+PROTECT_FAIL_WRITTEN = ("Do not switch the FM-1 off yet, and keep the cable in: it is most likely still waiting in "
+                        "update mode. Press Try again now: it starts over from the beginning. Only if FM-1 "
+                        "Switch cannot find it: switch it off, hold REC while you switch it on, and try again. "
+                        "If that does not work either, open My FM-1 won't start. Your full backup is saved here:")
 
 PUTBACK_FAILED = ("Something went wrong while writing, and putting things back as they were did not finish "
                   "either ({n} small part{s} left). Keep the cable in and the FM-1 switched on: it waits as long "
                   "as this page is open. Check that the cable sits firmly (no hub), then press Try again.")
 
-PUTBACK_GAVE_UP = ("Not everything could be put back as it was. Keep the cable in. Switch the FM-1 off, wait 10 "
-                   "seconds and switch it on. If it starts, put your backup back now (Back up my FM-1 > Put "
-                   "back…). If the screen stays dark, open My FM-1 won't start. Your full backup is saved here:")
+PUTBACK_GAVE_UP = ("Not everything could be put back as it was. Do not switch the FM-1 off yet, and keep the "
+                   "cable in: it is most likely still waiting in update mode. Open Back up my FM-1 > Put back… "
+                   "now and put your backup back. Only if FM-1 Switch cannot find it: switch it off, hold REC "
+                   "while you switch it on, and try again. If that does not work either, open My FM-1 won't "
+                   "start. Your full backup is saved here:")
 
-TASK_TEXT = {"protect": "Give the FM-1 a spare key: hold REC while you switch it on, and new firmware can always "
-                        "go on, even if the old one breaks. Do this first.",
+TASK_TEXT = {"protect": "Give the FM-1 a spare key: hold REC while you switch it on, and new firmware can go "
+                        "on even if the old one breaks. Do this first.",
              "install": "Put Wild, NB303, Felucca or another firmware on the FM-1, over the USB cable.",
              "backup": "Copy everything on the FM-1 to this computer: firmware, sounds, patterns and settings. "
                        "Put it back later if anything goes wrong.",
@@ -1667,9 +1672,7 @@ def main():
                 text(PUTBACK_GAVE_UP, pady=(px(10), 0))
                 text(str(live["backup"] or "(no backup path reported)"), style="Muted.TLabel")
             elif wrote:
-                text(PROTECT_FAIL_WRITTEN.replace("Run Protect my FM-1 again, which writes the boot area",
-                                                  "Run it again, which writes")
-                     if mode != "protect" else PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
+                text(PROTECT_FAIL_WRITTEN, pady=(px(10), 0))
                 text(str(live["backup"] or "(no backup path reported)"), style="Muted.TLabel")
             elif "did not appear" in msg:
                 text("The FM-1 did not show up in update mode. " + UPDATE_MODE_KEYS, pady=(px(10), 0))

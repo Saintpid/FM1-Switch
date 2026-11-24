@@ -383,8 +383,8 @@ _os.utime(pd / "protected.json", (2.3e9, 2.3e9))
 ok(S.protection(pd) == "not", "backups: M-VAVE's bootloader put back: not protected")
 ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S.FLOW.values()),
    "backups: each flow has its words")
-ok("Put back" in S.PUTBACK_GAVE_UP and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch" not in
-   S.PUTBACK_GAVE_UP and "waits as long" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
+ok("Put back" in S.PUTBACK_GAVE_UP and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in
+   S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in S.PROTECT_FAIL_WRITTEN and "waits as long" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
 st = "off"
 for present in (True, True, None, True):
     st = S.rec_step(st, present)
