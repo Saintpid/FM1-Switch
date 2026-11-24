@@ -1230,6 +1230,8 @@ def write_sectors(dev, now, new, order, say=print, step=None, again=None):
             dev.show(bar=(i + 1) * 100 // len(order), color=SCREEN_MINT)
         say("  final read ...")
         final = dev.read(0, FLASH_SIZE)
+        if final != new:                                     # (a passing read error: read it once more)
+            final = dev.read(0, FLASH_SIZE)
         if final != new or dev.crc32(0, FLASH_SIZE) not in (None, crc32(new)):
             bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != new[a:a + SECTOR]]
             touched = sorted(set(touched) | set(bad))

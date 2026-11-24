@@ -777,6 +777,10 @@ PUTBACK_FAILED = ("Something went wrong while writing, and {n} sector{s} would n
                   "cable in and the FM-1 switched on: it is kept in update mode while this page is open. Check "
                   "the cable (no hub), then try again.")
 
+PUTBACK_GAVE_UP = ("Part of what was written could not be put back. Leave the cable in. Switch the FM-1 off and "
+                   "on: if it starts, put the backup back now (Backups… > Put back…). If its screen stays dark, "
+                   "open My FM-1 won't start. Your full backup is saved here:")
+
 TASK_TEXT = {"protect": "Install the rescue bootloader, so the FM-1 can always be reached: hold REC while "
                         "you switch it on. A full backup is saved first.",
              "install": "Put Wild, NB303, Felucca or another FM-1 firmware on it, over USB.",
@@ -1633,6 +1637,9 @@ def main():
             text(msg)
             if wrote and "put back as it was" in msg:
                 text("Switch the FM-1 off and on: it starts as before. You can try again.", pady=(px(10), 0))
+            elif wrote and "could not be put back" in msg:
+                text(PUTBACK_GAVE_UP, pady=(px(10), 0))
+                text(str(live["backup"] or "(no backup path reported)"), style="Muted.TLabel")
             elif wrote:
                 text(PROTECT_FAIL_WRITTEN.replace("Run Protect my FM-1 again, which writes the boot area",
                                                   "Run it again, which writes")

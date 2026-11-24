@@ -1092,7 +1092,7 @@ try:
 except R.Fail:
     ok(True, "restore: never the key and MAC sector")
 # ---- something going wrong while it writes: everything written goes back, in the same session
-def failing_restore(fail_at, final_bad=False, again=None, stuck=()):
+def failing_restore(fail_at, final_bad=0, again=None, stuck=()):
     d = FakeMflr(bytes(changed))
     up = R.Uboot(d)
     real_p = R.Uboot._program
@@ -1114,7 +1114,7 @@ def failing_restore(fail_at, final_bad=False, again=None, stuck=()):
 
         def read(a, n):
             got = real_read(a, n)
-            if n == R.FLASH_SIZE and once["n"] == 2:   # (after the backup's two whole reads)
+            if n == R.FLASH_SIZE and 2 <= once["n"] < 2 + final_bad:   # (after the backup's two reads)
                 got = bytearray(got)
                 got[0x60000] ^= 0xFF
                 got = bytes(got)
@@ -1136,7 +1136,9 @@ ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) =
 r, d, up, _ = failing_restore(0x1000)
 ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) == bytes(changed),
    "put back: a boot sector that fails: the firmware and data written go back as well")
-r, d, up, _ = failing_restore(None, final_bad=True)
+r, d, up, _ = failing_restore(None, final_bad=1)
+ok(r == "restored" and bytes(d.flash) == saved, "put back: one passing bad final read is read again, not undone")
+r, d, up, _ = failing_restore(None, final_bad=2)
 ok(isinstance(r, R.Fail) and "final read differs" in str(r) and "put back as it was" in str(r)
    and bytes(d.flash) == bytes(changed), "put back: a final read that differs: everything goes back too")
 asked = []
