@@ -4,6 +4,10 @@ A version is a `VERSION` change with its section below (CI checks the section is
 
 ## 1.5.3
 
+- **Plain words everywhere.** Every screen was rewritten so you do not need to know what a
+  bootloader, a flash sector or a JEDEC ID is: Protect my FM-1 explains itself as a spare key, the
+  map shows squares, the chip has a name you can read, and every "power-cycle" now says what to do:
+  switch it off, wait 10 seconds, switch it on. The technical details are still shown, last.
 - **Clearer words about update mode.** The FM-1's screen stays dark in update mode: the REC steps say
   so, and the start screen no longer says the firmware does not start when the FM-1 is there after REC,
   a backup or an install. Holding PLAY at power-on (the rescue bootloader's menu) is named as the way

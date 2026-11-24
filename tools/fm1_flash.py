@@ -573,9 +573,9 @@ def _boot_ok(flash):
 # ------------------------------------------------------------- sector map ---
 BOOT, FIRMWARE, SETTINGS, PAIRINGS, CALIBRATION, PRESETS, SEQUENCES, SOUNDS, MAC, FREE = (
     "boot", "firmware", "settings", "pairings", "calibration", "presets", "sequences", "sounds", "mac", "free")
-REGION_TEXT = {BOOT: "Bootloader", FIRMWARE: "Firmware", SETTINGS: "Settings", PAIRINGS: "Bluetooth pairings",
+REGION_TEXT = {BOOT: "Start-up program", FIRMWARE: "Firmware", SETTINGS: "Settings", PAIRINGS: "Bluetooth pairings",
                CALIBRATION: "Factory calibration", PRESETS: "Presets", SEQUENCES: "Sequences",
-               SOUNDS: "Synth sounds", MAC: "Bluetooth address", FREE: "Free / not declared"}
+               SOUNDS: "Synth sounds", MAC: "Bluetooth address", FREE: "Empty or unknown"}
 _REGION_OF = {"VM": SETTINGS, "BTIF": PAIRINGS, "USRTRIM": CALIBRATION, "USRFLASH": PRESETS,
               "SEQ64": SEQUENCES, "USR": SOUNDS}
 # M-VAVE's FM-1 015 layout, for a flash whose firmware table cannot be read

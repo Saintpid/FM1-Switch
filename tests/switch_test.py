@@ -140,7 +140,7 @@ ok(S.diagnose(dev, lambda: False, 0.05, poll=0.01) == ("none", None) and S.diagn
    "diagnosis: nothing (and without MIDI or USB probing)")
 texts = [S.advice("running", "FM-1_846"), S.advice("loader", "ota-FM-1_900"), S.advice("uboot"),
          S.advice("none"), S.advice("none", probe_ok=False)]
-ok("Install" in texts[1][1] and "Rescue" in texts[2][1] and "transporter" in texts[3][1]
+ok("Install" in texts[1][1] and "won't start" in texts[2][1] and "won't start" in texts[3][1]
    and "pyusb" in texts[4][1] and "FM-1_846" in texts[0][0], "advice: what to do in each state")
 
 # ---- the unbrick guide: the FM-1 first, questions only when it says nothing, then one thing to try
@@ -176,7 +176,7 @@ ok("--allow-ucun-write" not in a
    and "--allow-ucun-write" in S.rescue_args("v.fwsc", rd, "p", allow_ucun=True),
    "UCUN recovery: explicit opt-in only")
 err = I.InstallError("stopped", "stopped answering after 0 requests")
-ok("UCUN" in S.install_error_text(err) and "does not identify" in S.install_error_text(err)
+ok("UCUN" in S.install_error_text(err) and "does not tell which chip" in S.install_error_text(err)
    and S.install_error_text(I.InstallError("model", "wrong model")) == "wrong model",
    "update diagnosis: possible UCUN incompatibility, no inferred chip ID")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
@@ -297,7 +297,7 @@ with patch.object(R, "package_flash_image", return_value=ids_image([0x856014])):
                                                                       "jedec_id": "B36014"}}))
     warn2 = S.flash_warning(pk2, S.last_hardware(hw))
 ok(warn and "B36014" in warn and "864" in warn, "install: Puya-only firmware warned about UCUN flash")
-ok(warn2 and "UCUN UC25HQ80 (B36014)" in warn2.split("identified here")[1], "install: the last identified flash is named")
+ok(warn2 and "newer FM-1 memory chip (UCUN)" in warn2.split("checked here")[1], "install: the last identified flash is named")
 with patch.object(R, "package_flash_image", return_value=ids_image([0x856014, 0xB36014])):
     ok(S.flash_warning(S.Package(wild, "FM-1_869")) is None, "install: firmware with UCUN support not warned")
 with patch.object(R, "package_flash_image", return_value=bytes(img)):
@@ -320,7 +320,7 @@ ok(pa[:2] == ["--protect", "--ask"] and "--write" not in pa and pa[pa.index("--p
    and pa[pa.index("--mflr-dir") + 1] == str(rd) and pa[pa.index("--tries") + 1] == "3"
    and "--allow-ucun-write" not in pa and "--via" not in pa,
    "protect: the helper asks the window before it writes, over USB, UCUN only by the answer")
-ok(S.chip_text({"jedec_id": "856014"}).startswith("the first") and "UCUN" in S.chip_text({"jedec_id": "b36014"})
+ok(S.chip_text({"jedec_id": "856014"}).startswith("the original") and "UCUN" in S.chip_text({"jedec_id": "b36014"})
    and S.chip_text({"jedec_id": "123456", "flash_name": "X"}) == "X (123456)", "protect: the flash chip in plain words")
 ft = S.found_text({"jedec_id": "856014"}, {"bootloader_text": "M-VAVE's (stock)", "firmware": "Wild 0.3.43",
                                            "firmware_status": "ok", "firmware_hub": []})
@@ -331,10 +331,10 @@ ft = S.found_text({"jedec_id": "856014"}, {"firmware": "X", "firmware_status": "
 ok("X (damaged files)." in ft and "thefirmwarehub" in ft and S.found_text({"jedec_id": "856014"}, None).count("\n") == 0,
    "protect: a damaged firmware is said, a hub name credited")
 pt = S.plan_text({"sectors": [0, 0x1000, 0x3000], "firmware_ok": True})
-ok("3 of 256" in pt and "not whole" not in pt and "not whole" in S.plan_text({"sectors": [0], "firmware_ok": False}),
+ok("3 outlined" in pt and "damaged" not in pt and "damaged" in S.plan_text({"sectors": [0], "firmware_ok": False}),
    "protect: the plan in one sentence")
 lg = S.map_legend(["boot"] * 4 + ["firmware"] * 100 + ["free"] * 150 + ["mac", "boot"])
-ok([x[0] for x in lg] == ["boot", "firmware", "free", "mac"] and lg[0][1] == "Bootloader"
+ok([x[0] for x in lg] == ["boot", "firmware", "free", "mac"] and lg[0][1] == "Start-up program"
    and all(c.startswith("#") for _, _, c in lg), "protect: the map's legend, each region once")
 pd = Path(tempfile.mkdtemp(prefix="fm1-protect-"))
 ok(S.protection(pd) is None and S.last_backup(pd) is None, "protect: nothing read yet")
@@ -374,8 +374,8 @@ bl = S.backups(bd)
 ok([b["path"].name for b in bl] == ["fm1-backup-b.bin", "fm1-backup-a.bin"] and bl[1]["kind"] == "stock"
    and S.backup_row(bl[0])[1:] == ("Wild 0.3.43", "open text") and S.backups(bd / "none") == [],
    "backups: whole ones with their description, newest first")
-ok("3 of 256" in S.restore_plan_text({"sectors": [0, 1, 2], "boot": True, "firmware": "Wild"})
-   and "bootloader." in S.restore_plan_text({"sectors": [0], "boot": True})
+ok("3 outlined" in S.restore_plan_text({"sectors": [0, 1, 2], "boot": True, "firmware": "Wild"})
+   and "start-up program." in S.restore_plan_text({"sectors": [0], "boot": True})
    and "already the same" in S.restore_plan_text({"sectors": [0x5000], "boot": False})
    and "not touched" in S.restore_plan_text({"sectors": [0], "boot_only": True}), "backups: the plan in one sentence")
 S.mark_protected(pd, None, "not")
@@ -384,7 +384,7 @@ ok(S.protection(pd) == "not", "backups: M-VAVE's bootloader put back: not protec
 ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S.FLOW.values()),
    "backups: each flow has its words")
 ok("Put back" in S.PUTBACK_GAVE_UP and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch" not in
-   S.PUTBACK_GAVE_UP and "kept in update mode" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
+   S.PUTBACK_GAVE_UP and "waits as long" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
 st = "off"
 for present in (True, True, None, True):
     st = S.rec_step(st, present)
@@ -392,7 +392,7 @@ ok(st == "off", "REC: an FM-1 still in update mode after writing does not count 
 for present in (False, None, True):
     st = S.rec_step(st, present)
 ok(st == "rec" and S.rec_step("rec", False) == "rec", "REC: it must leave update mode and come back")
-ok("dark" in S.REC_STEPS[1] and "PLAY" in S.REC_NOTE and "expected" in S.advice("uboot")[1],
+ok("dark" in S.REC_STEPS[1] and "PLAY" in S.REC_NOTE and "normal" in S.advice("uboot")[1],
    "REC: the screen stays dark in update mode, PLAY shows the menu")
 ok("RESTARTING" in S.REC_STEPS[0], "REC: says to switch it off when it did not restart by itself")
 
