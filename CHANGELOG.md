@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.7
+
+- **Start here, sturdier.** Its ticks now say which FM-1 they are for (the one backed up, and when),
+  Start over begins again for another FM-1, a backup counts only if it still matches its checksum,
+  Put on a firmware asks before going on without a backup, and on Windows the backup step says what
+  to do if the ransomware protection blocks the app.
+
 ## 1.5.6
 
 - **Start here.** A new button at the top takes someone who has just got an FM-1 through the three

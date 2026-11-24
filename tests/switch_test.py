@@ -403,12 +403,17 @@ ok(not _re.search(r"\b(Wild|NB303)\b", _ui + S.advice("running", "X")[1] + S.adv
                   + " ".join(" ".join(S.plan(st, "X", sc).steps) for st in ("running", "uboot", "none")
                              for sc in (None, "normal", "safe", "dark", "loop"))),
    "texts: no firmware is favoured by name (M-VAVE's V15 only, as the factory one)")
+import time  # noqa: E402
 sd = Path(tempfile.mkdtemp(prefix="fm1-start-"))
 st0 = S.start_state(sd)
-ok(st0 == {"backup": False, "protect": False, "firmware": False} and S.start_next(st0) == "backup",
+ok((st0["backup"], st0["protect"], st0["firmware"]) == (False, False, False) and S.start_next(st0) == "backup",
    "start here: a new FM-1 begins with the backup")
 (sd / "fm1-backup-1.bin").write_bytes(bytes(R.FLASH_SIZE))
 (sd / "fm1-backup-1.bin.json").write_text(_json.dumps({"backup_sha256": "x", "hardware": {"bootloader": "stock"}}))
+ok(S.start_next(S.start_state(sd)) == "backup", "start here: a backup that does not match its checksum does not count")
+(sd / "fm1-backup-1.bin.json").write_text(_json.dumps({"backup_sha256": R.sha256(bytes(R.FLASH_SIZE)),
+                                                       "hardware": {"bootloader": "stock"}}))
+_os.utime(sd / "fm1-backup-1.bin", (time.time() - 50, time.time() - 50))
 ok(S.start_next(S.start_state(sd)) == "protect", "start here: a saved backup ticks step 1, Protect is next")
 S.start_mark(sd, "protect", "skipped")
 ok(S.start_state(sd)["protect"] == "skipped" and S.start_next(S.start_state(sd)) == "firmware",
@@ -417,6 +422,10 @@ S.start_mark(sd, "firmware")
 ok(S.start_next(S.start_state(sd)) is None, "start here: an install from here ticks the last step")
 S.mark_protected(sd, "2.4")
 ok(S.start_state(sd)["protect"] is True, "start here: a protected FM-1 ticks Protect")
+S.start_over(sd)
+so = S.start_state(sd)
+ok(not so["backup"] and not so["protect"] and not so["firmware"],
+   "start here: Start over (another FM-1) counts only what happens from then on")
 ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker"),
    "start here: the hub linked, the one firmware tip labelled as the maker's")
 

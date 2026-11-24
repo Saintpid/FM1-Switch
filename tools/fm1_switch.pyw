@@ -834,12 +834,14 @@ START_STEPS = (
     ("backup", "Make a backup",
      "Copies everything on your FM-1 to this computer: its firmware, sounds, patterns and settings. "
      "Whatever happens later, this puts it back exactly as it is today. Nothing on the FM-1 is changed. "
-     "Afterwards, copy the backup files somewhere else too (a USB stick, a cloud folder).",
+     "Afterwards, copy the backup files somewhere else too (a USB stick, a cloud folder)."
+     + (" (If Windows says access is denied, its ransomware protection blocks the app: allow FM1-Switch.exe "
+        "under Windows Security > Ransomware protection > Allow an app.)" if sys.platform == "win32" else ""),
      "Back up now…"),
     ("protect", "Give it a spare key",
      "This is the one step that writes to the FM-1: only its tiny start-up program, in a few seconds. "
-     "Afterwards, holding REC while you switch it on always lets new firmware go on, even if a firmware "
-     "breaks. Use a cable straight into the computer (no hub), and charge the FM-1 first. You can skip "
+     "Afterwards, holding REC while you switch it on lets new firmware go on even if a firmware breaks "
+     "(only a power cut while this step writes could need more help). Use a cable straight into the computer (no hub), and charge the FM-1 first. You can skip "
      "this, but then a broken firmware is much harder to fix.",
      "Protect…"),
     ("firmware", "Put on a firmware",
@@ -857,19 +859,49 @@ START_AFTER = ("After a backup or Protect the FM-1's screen stays dark (update m
 START_DONE = "All three done. Have fun! (This window stays here if you want to look again.)"
 
 
+_CHECKED = {}
+
+
+def _backup_ok(b):
+    """a backup file that still matches its checksum (read once per file and time)"""
+    key = (str(b["path"]), b["when"])
+    if key not in _CHECKED:
+        try:
+            R.read_backup(str(b["path"]))
+            _CHECKED[key] = True
+        except R.Fail:
+            _CHECKED[key] = False
+    return _CHECKED[key]
+
+
 def start_state(d):
-    """the Start here guide's progress, from what is really there: a backup with its checksum, the
-    FM-1 protected (or the step skipped), a firmware installed from here -> {step: True/False/"skipped"}"""
+    """the Start here guide's progress, from what is really there since it was started (Start over: for
+    another FM-1): a backup that matches its checksum, the FM-1 protected (or the step skipped), a
+    firmware installed from here -> {step: True/False/"skipped", "since": time, "backup_when": time}"""
     try:
         seen = json.loads((Path(d) / "start-here.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         seen = {}
     seen = seen if isinstance(seen, dict) else {}
-    out = {"backup": bool(backups(d)),
-           "protect": True if protection(d) == "protected" else "skipped" if seen.get("protect") == "skipped"
-           else False,
-           "firmware": bool(seen.get("firmware"))}
-    return out
+    since = seen.get("since", 0)
+    good = [b for b in backups(d) if b["when"] >= since and _backup_ok(b)]
+    try:
+        pw = (Path(d) / "protected.json").stat().st_mtime
+    except OSError:
+        pw = 0
+    prot = protection(d) == "protected" and (pw >= since or bool(good) and good[0]["kind"] == "open")
+    return {"backup": bool(good),
+            "protect": True if prot else "skipped" if seen.get("protect") == "skipped" else False,
+            "firmware": bool(seen.get("firmware")), "since": since,
+            "backup_when": good[0]["when"] if good else None}
+
+
+def start_over(d):
+    """Start here for another FM-1: only what happens from now on counts"""
+    try:
+        (Path(d) / "start-here.json").write_text(json.dumps({"since": time.time()}), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def start_mark(d, step, value=True):
@@ -2170,8 +2202,16 @@ def main():
         ttk.Label(f, text="Start here", style="Head.TLabel").pack(anchor="w")
         ttk.Label(f, text=START_INTRO, wraplength=wrap, justify="left").pack(anchor="w", pady=(px(4), px(10)))
         rows = {}
+        def first_backup(go):
+            def run():
+                if start_state(d)["backup"] or messagebox.askyesno(
+                        "FM-1 Switch – Start here", "There is no backup of this FM-1 yet. Without one, a "
+                        "firmware that goes wrong cannot be undone. Go on anyway?", icon="warning",
+                        default="no", parent=w):
+                    go()
+            return run
         acts = {"backup": do_inspect, "protect": lambda: open_protect(),
-                "firmware": lambda: show_install()}
+                "firmware": first_backup(lambda: show_install())}
         for i, (k, title, text, button) in enumerate(START_STEPS, 1):
             c = ttk.Frame(f, style="Card.TFrame", padding=(px(14), px(10)))
             c.pack(fill="x", pady=(0, px(8)))
@@ -2205,7 +2245,14 @@ def main():
         ttk.Label(f, text=START_AFTER, style="Muted.TLabel", wraplength=wrap, justify="left").pack(anchor="w")
         done_var = tk.StringVar()
         ttk.Label(f, textvariable=done_var, style="Head.TLabel", wraplength=wrap).pack(anchor="w", pady=(px(8), 0))
-        ttk.Button(f, text="Close", command=w.destroy).pack(side="bottom", anchor="e")
+        foot = ttk.Frame(f)
+        foot.pack(side="bottom", fill="x")
+        ttk.Button(foot, text="Close", command=w.destroy).pack(side="right")
+        ttk.Button(foot, text="Start over (another FM-1)",
+                   command=lambda: (start_over(d), refresh())).pack(side="left")
+        which = tk.StringVar()
+        ttk.Label(f, textvariable=which, style="Muted.TLabel", wraplength=wrap).pack(side="bottom", anchor="w",
+                                                                                   pady=(0, px(6)))
 
         def refresh():
             if not w.winfo_exists():
@@ -2217,6 +2264,9 @@ def main():
                 mark.set({True: "✓ DONE", "skipped": "SKIPPED"}.get(st[k], "NEXT" if k == nxt else ""))
                 b.configure(style="Accent.TButton" if k == nxt else "TButton")
             done_var.set(START_DONE if nxt is None else "")
+            which.set(("The ticks are for the FM-1 backed up here on "
+                       + time.strftime("%Y-%m-%d %H:%M", time.localtime(st["backup_when"]))
+                       + ". Another FM-1? Press Start over.") if st["backup_when"] else "")
             start_b.configure(style="TButton" if nxt is None else "Accent.TButton")
         def tick():
             if w.winfo_exists():
