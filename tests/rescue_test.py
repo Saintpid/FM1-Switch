@@ -24,6 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import fm1_rescue as R  # noqa: E402
+import fm1_flash as FL  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+from fm1_fixture import boot_area, open_boot, unit_flash  # noqa: E402
 
 failed = 0
 
@@ -59,12 +62,12 @@ class FakeUboot:
         a = cdb[2:]
         rom = {R.CMD_WRITE_MEMORY, R.CMD_READ_MEMORY, R.CMD_JUMP}
         if (cmd in rom) != (self.mode == "rom"):
-            raise R.Fail("command failed (status 2)")
+            raise R.Refused("command failed (status 2)")
         if cmd in (R.CMD_WRITE_MEMORY, R.CMD_WRITE_FLASH):
             addr, n = struct.unpack(">IH", a[:6])
             crc = struct.unpack("<H", a[7:9])[0]
             if data_out is None or len(data_out) != n or R.crc16(data_out) != crc:
-                raise R.Fail("command failed (status 2)")
+                raise R.Refused("command failed (status 2)")
             if cmd == R.CMD_WRITE_MEMORY:
                 self.ram[addr] = bytes(data_out)
             else:
@@ -95,22 +98,36 @@ class FakeUboot:
         if cmd == R.CMD_RUN_APP:
             self.ran = True
             return self.reply(cmd)
-        raise R.Fail("command failed (status 2)")
+        raise R.Refused("command failed (status 2)")
 
 
 class FakeWin32:
     """DeviceIoControl as Windows' disk driver does it: the struct read from memory, the data
     through its pointer; PhysicalDrive0 is an ordinary disk, PhysicalDrive2 the FM-1"""
 
-    def __init__(self, dev):
+    def __init__(self, dev, volumes=None):
         self.C, self.dev, self.calls = C, dev, []
+        self.volumes = volumes or {}                           # drive letter -> the disk it is on
+        self.closed = []
 
     def open(self, path, rw):
+        if "PhysicalDrive" not in path:
+            c = path[4]
+            return 1000 + ord(c) if c in self.volumes else None
         n = int(path.rsplit("PhysicalDrive", 1)[1])
         return n + 100 if n in (0, 2) else None
 
     def ioctl(self, h, code, inaddr, n_in, outaddr, n_out):
         self.calls.append(code)
+        if h >= 1000:
+            c = chr(h - 1000)
+            if code == R.IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS:
+                C.memmove(outaddr, struct.pack("<I4xI4xqq", 1, self.volumes[c], 0, 1 << 20), 32)
+                return 32
+            if code in (R.FSCTL_LOCK_VOLUME, R.FSCTL_DISMOUNT_VOLUME):
+                self.calls.append((code, c))
+                return 0
+            raise R.Fail("Windows refused the command (error 1)")
         if code == R.IOCTL_STORAGE_QUERY_PROPERTY:
             v, p = (b"WL82", b"UBOOT1.00") if h == 102 else (b"Samsung", b"SSD 980")
             d = bytearray(64)
@@ -139,7 +156,7 @@ class FakeWin32:
         return n_in
 
     def close(self, h):
-        pass
+        self.closed.append(h)
 
 
 def app_head(image, key=0x980F):
@@ -254,6 +271,7 @@ class FakeTransporter:
 def flashes():
     rnd = random.Random(7)
     image = bytearray(rnd.randrange(256) for _ in range(R.APP_END))
+    image[:R.WRITE_MIN] = boot_area()                              # M-VAVE's bootloader, working
     app_head(image)
     now = bytearray(image) + bytes(rnd.randrange(256) for _ in range(R.FLASH_SIZE - R.APP_END))
     for a in (0x5000, 0x6000, 0x40000, 0x92000):                  # the crashing firmware's sectors
@@ -320,13 +338,19 @@ except R.Fail as e:
        "different backup reads: refused before erase/write")
 
 bad = bytearray(now)
-bad[0x1234] ^= 1
+bad[0x1234] ^= 1                                                   # in the bootloader: it fails its CRC
 dev = FakeUboot(bad)
 try:
     R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
-    ok(False, "a different head (below 0x4000): refused")
+    ok(False, "the FM-1's own boot area cannot start it: refused")
 except R.Fail as e:
-    ok("not writing" in str(e) and not dev.erased, "a different head (below 0x4000): refused")
+    ok("cannot start it" in str(e) and not dev.erased, "the FM-1's own boot area cannot start it: refused")
+mb = bytearray(now)
+mb[:R.WRITE_MIN] = boot_area(open_boot("2.4-test"))[:R.WRITE_MIN]   # another working bootloader
+dev = FakeUboot(mb)
+ok(R.rescue(R.Uboot(dev), image, LOADER, True, tmp, say=lambda *a, **k: None)
+   and bytes(dev.flash) == bytes(mb[:R.WRITE_MIN]) + image[R.WRITE_MIN:] + now[R.APP_END:],
+   "V15 under another working bootloader: written, that bootloader kept")
 
 dev = FakeUboot(now, fid=0x854015)
 try:
@@ -348,8 +372,9 @@ for fid in (0x856014, 0xB36014):
        and meta["backup_sha256"] == R.sha256(now) and meta["matching_full_reads"] == 2
        and meta["saved_file_verified"] and meta["backup_bytes"] == R.FLASH_SIZE,
        f"{fid:06X}: identify and verify full backup without erase/program/runapp")
-    ok(json.loads(Path(steps[0][1]["report"]).read_text())["hardware"] == info
-       and meta["hardware"] == info and info["firmware_compatibility"] == "unknown",
+    rep = json.loads(Path(steps[0][1]["report"]).read_text())["hardware"]
+    ok(all(info[k] == v for k, v in rep.items()) and meta["hardware"] == info
+       and info["firmware_compatibility"] == "unknown" and info["bootloader"] == "stock",
        f"{fid:06X}: measured hardware in standalone report and backup metadata")
 
 dev = FakeUboot(now, fid=R.UCUN_FLASH)
@@ -476,11 +501,8 @@ R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None
 ok(bytes(dev.flash) == now[:R.WRITE_MIN] + image[R.WRITE_MIN:] + now[R.APP_END:] and min(dev.writes) >= R.WRITE_MIN,
    "any firmware: its app area written, the FM-1's own head kept")
 dev = FakeUboot(now)
-try:
-    R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None)
-    ok(False, "V15 (strict head): a different head is still refused")
-except R.Fail:
-    ok(not dev.erased, "V15 (strict head): a different head is still refused")
+R.rescue(R.Uboot(dev), bytes(other), LOADER, True, tmp, say=lambda *a, **k: None)
+ok(bytes(dev.flash)[:R.WRITE_MIN] == now[:R.WRITE_MIN], "V15 too: the package's head is never written")
 wrongkey = bytearray(image)
 app_head(wrongkey, key=0x1234)
 dev = FakeUboot(now)
@@ -578,15 +600,18 @@ try:
 except R.Fail:
     ok(True, "another loader: refused")
 
-# ---- on a real Windows (CI): the kernel32 calls load and look at the disks without an administrator
+# ---- on a real Windows: the kernel32 calls load and look at the disks without an administrator. Only
+# the disks' descriptions are read, and an FM-1 left in update mode on the PC is fine (no command is sent)
 if sys.platform == "win32":
-    ok(R.windows_uboot_disks() == [] and R.uboot_present() is False and R.is_admin() in (True, False),
-       "Windows: the disks looked at, no FM-1 among them")
+    disks = R.windows_uboot_disks()
+    ok(isinstance(disks, list) and R.uboot_present() is bool(disks) and R.is_admin() in (True, False),
+       "Windows: the disks looked at (an FM-1 in update mode among them or not)")
 
 # Approval denial must not signal readiness or start a device wait.
 progress = str(Path(tmp) / "denied.jsonl")
 with patch.object(R, "load_package", return_value=(image, "v15", "FM-1_015")), \
      patch.object(R, "get_loader", return_value=LOADER), \
+     patch.object(R, "get_mflr", return_value=LOADER), \
      patch.object(R, "is_admin", return_value=False), \
      patch.object(R, "open_device") as opened:
     code = R.main(["fixture.fwsc", "--write", "--progress", progress])
@@ -622,7 +647,7 @@ with patch.object(R, "get_loader", return_value=LOADER), \
      patch.object(R.sys, "platform", "win32"), \
      patch.object(R, "open_device", return_value=dev), \
      patch.object(R, "load_package") as loaded, patch.object(R, "download_stock") as downloaded:
-    code = R.main(["--inspect", "--backup-dir", tmp, "--progress", progress, "--tries", "1"])
+    code = R.main(["--inspect", "--backup-dir", tmp, "--progress", progress, "--tries", "1", "--loader-kind", "jieli"])
 events, _ = R.read_progress(progress)
 ok(code == 0 and not loaded.called and not downloaded.called and not dev.erased and not dev.writes
    and events[-1]["operation"] == "inspect" and Path(events[-1]["backup"]).exists(),
@@ -684,6 +709,643 @@ dev = FakeUboot(now, fid=0xB36014)
 ok(R.rescue(R.Uboot(dev), image, LOADER, False, tmp, allow_ucun=True, kind="other", say=said.append) is False
    and any("not known" in str(t) for t in said),
    "UCUN unit + firmware without IDs: warned before the backup")
+
+# ---- M-Flasher's loader (MFLR): started in a free RAM slot, the chip's CRC32 checks the writes
+def mflr_image(slot, version=b"2.3"):
+    return random.Random(slot).randbytes(0x300) + b"MFLR" + version + bytes(9) + random.Random(slot + 9).randbytes(5000)
+
+
+MFLR = R.MflrLoader([("mflr-loader-a.bin", 0x01C20000, mflr_image(1)), ("mflr-loader-b.bin", 0x01C28000, mflr_image(2))])
+
+
+class FakeMflr(FakeUboot):
+    """FakeUboot whose ROM also starts M-Flasher's loader: its builds for RAM A and B (uploaded scrambled,
+    each 512-byte block on its own), then its own commands as well as the flash ones"""
+
+    def __init__(self, flash, running=None, has_flash=True, **kw):
+        super().__init__(flash, **kw)
+        self.mflr_at, self.jumps, self.shown, self.crcs = None, [], [], 0
+        self.has_flash = has_flash
+        if running == "jieli":
+            self.mode = "loader"
+        elif running:
+            self.mode, self.mflr_at = "mflr", running
+        self.last_error = 0
+
+    def xfer(self, cdb, data_out=None, n_in=0, timeout=5000):
+        cdb = bytes(cdb)
+        cmd = struct.unpack(">H", cdb[:2])[0] if cdb[0] != 0x12 else None
+        a = cdb[2:]
+        mflr_cmds = {R.CMD_MFLR_IDENTIFY, R.CMD_MFLR_CRC32, R.CMD_MFLR_UNIQUE_ID, R.CMD_MFLR_DISPLAY_ON,
+                     R.CMD_MFLR_DISPLAY_TEXT, R.CMD_MFLR_DISPLAY_BAR, R.CMD_MFLR_LAST_ERROR, R.CMD_USB_BUFFER_SIZE}
+        if cmd == R.CMD_JUMP and self.mode in ("rom", "mflr") and \
+                struct.unpack(">I", a[:4])[0] in [at for _, at, _ in MFLR.slots]:
+            addr = struct.unpack(">I", a[:4])[0]
+            for _, at, img in MFLR.slots:
+                if addr == at:
+                    got = bytearray(b"".join(self.ram[k] for k in sorted(self.ram) if at <= k < at + 0x8000))
+                    for off in range(0, len(got), 512):          # each block scrambled on its own
+                        blk = got[off:off + 512]
+                        R.crc_cipher(blk)
+                        got[off:off + 512] = blk
+                    if bytes(got) == img:
+                        self.mode, self.mflr_at = "mflr", at
+                        self.jumps.append(at)
+            return self.reply(cmd)
+        if self.mode == "mflr" and cmd == R.CMD_WRITE_MEMORY:
+            addr, n = struct.unpack(">IH", a[:6])
+            self.ram[addr] = bytes(data_out)
+            return b""
+        if cmd in mflr_cmds:
+            if self.mode != "mflr":
+                raise R.Refused("command failed (status 2)")
+            if cmd == R.CMD_MFLR_IDENTIFY:
+                return self.reply(cmd, b"MFLR2.3\0" + struct.pack(">I", self.mflr_at) + b"\0\xF0")
+            if cmd == R.CMD_MFLR_CRC32:
+                addr, n = struct.unpack(">II", a[:8])
+                self.crcs += 1
+                return self.reply(cmd, struct.pack(">I", zlib.crc32(bytes(self.flash[addr:addr + n]))))
+            if cmd == R.CMD_MFLR_UNIQUE_ID:
+                return self.reply(cmd, bytes.fromhex("0123456789abcdef"))
+            if cmd == R.CMD_MFLR_LAST_ERROR:
+                e, self.last_error = self.last_error, 0
+                return self.reply(cmd, bytes([e]))
+            if cmd == R.CMD_USB_BUFFER_SIZE:
+                return self.reply(cmd, struct.pack(">I", 4096))
+            if cmd == R.CMD_MFLR_DISPLAY_TEXT:
+                self.shown.append(bytes(data_out).decode().strip())
+                return b""
+            return self.reply(cmd)
+        if self.mode == "mflr":
+            if cmd == R.CMD_READ_FLASH and not self.has_flash:
+                self.last_error = R.MFLR_OUT_OF_RANGE
+                raise R.Refused("command failed (status 2)")
+            mode, self.mode = self.mode, "loader"
+            try:
+                return super().xfer(cdb, data_out, n_in, timeout)
+            finally:
+                self.mode = mode
+        return super().xfer(cdb, data_out, n_in, timeout)
+
+
+image, now = flashes()
+dev = FakeMflr(now)
+up = R.Uboot(dev)
+steps = []
+ok(R.rescue(up, image, MFLR, True, tmp, say=lambda *a, **k: None, step=lambda k, v=None: steps.append((k, v)))
+   and bytes(dev.flash) == image + now[R.APP_END:], "MFLR: rescued through M-Flasher's loader")
+ok(dev.jumps == [0x01C20000] and up.mflr == "2.3" and up.read_io == 16384 and up.write_io == 4096,
+   "MFLR: started in RAM A, scrambled block by block; large reads")
+ok(dev.crcs >= 1 + 4, "MFLR: the chip's CRC32 checks the reads and each written sector")
+info = [v for k, v in steps if k == "hardware"][0]
+backup = [v for k, v in steps if k == "backup"][0]
+meta = json.loads(Path(backup + ".json").read_text())
+ok(meta["hardware"]["unique_id"] == "0123456789abcdef" and meta["chip_crc32_checked"]
+   and meta["hardware"]["bootloader_text"] == "M-VAVE's (stock)", "MFLR: the flash's unique ID and the analysis saved")
+ok(any("DO NOT SWITCH OFF" in t for t in dev.shown) and any("DONE - VERIFIED" in t for t in dev.shown)
+   and any("IF STUCK: OFF+ON" in t for t in dev.shown),
+   "MFLR: the FM-1's own screen says what happens")
+ana = [v for k, v in steps if k == "analysis"]
+ok(ana and len(ana[0]["map"]) == 256 and ana[0]["map"][0] == "boot", "MFLR: the flash map for the window")
+dev = FakeMflr(now, running=0x01C20000)
+up = R.Uboot(dev)
+up.start_loader(MFLR)
+ok(dev.jumps == [] and up.mflr == "2.3", "MFLR: a loader of ours that runs is used again")
+dev = FakeMflr(now, running="jieli")
+try:
+    R.Uboot(dev).start_loader(MFLR)
+    ok(False, "MFLR: refused while JieLi's loader runs")
+except R.Fail as e:
+    ok("another flash loader" in str(e) and not dev.jumps, "MFLR: refused while JieLi's loader runs")
+dev = FakeMflr(now, has_flash=False)
+try:
+    R.Uboot(dev).start_loader(MFLR)
+    ok(False, "MFLR: a loader that found no flash: refused")
+except R.Fail as e:
+    ok("did not identify itself" in str(e) and dev.jumps == [0x01C20000, 0x01C28000],
+       "MFLR: no flash found: started again in RAM B once, then refused")
+dev = FakeMflr(now)
+up = R.Uboot(dev)
+up.start_loader(MFLR)
+plain_read = up.read
+up.read = lambda addr, n: (lambda d: d[:0x50000] + bytes([d[0x50000] ^ 1]) + d[0x50001:])(plain_read(addr, n))
+reads = []
+try:
+    R.inspect_backup(up, MFLR, tmp, say=lambda *a, **k: None, step=lambda *a: reads.append(a))
+    ok(False, "MFLR: reads that disagree with the chip's CRC32: refused")
+except R.Fail as e:
+    ok("chip's own checksum" in str(e), "MFLR: reads that disagree with the chip's CRC32: refused")
+
+# ---- FM-1 016: a longer image (to 0xA9000), M-VAVE's download either V15 or 016
+long_img = bytearray(random.Random(16).randbytes(R.APP_MAX))
+long_img[:R.WRITE_MIN] = boot_area()
+app_head(long_img)
+dev = FakeMflr(now)
+ok(R.rescue(R.Uboot(dev), bytes(long_img), MFLR, True, tmp, say=lambda *a, **k: None)
+   and bytes(dev.flash) == now[:R.WRITE_MIN] + bytes(long_img[R.WRITE_MIN:]) + now[R.APP_MAX:]
+   and max(dev.erased) < R.APP_MAX, "016: written up to 0xA9000, nothing after it")
+up = R.Uboot(FakeMflr(now))
+up.app_end = R.APP_MAX + 0x1000
+try:
+    up.start_loader(MFLR)
+    up.write_sector(R.APP_MAX, bytes(R.SECTOR))
+    ok(False, "016: never past 0xA9000, whatever the image")
+except R.Fail as e:
+    ok("refusing to write" in str(e), "016: never past 0xA9000, whatever the image")
+pkg016 = make_fwsc(bytes(long_img), "FM-1_016")
+with patch.object(R, "STOCK_FM1", {R.STOCK_SHA256: "V15", R.sha256(pkg016): "016"}), \
+        patch.object(R, "fetch", lambda url, timeout=60: pkg016):
+    d = tempfile.mkdtemp(prefix="fm1-016-")
+    p016 = R.download_stock(d, say=lambda *a, **k: None)
+    img, kind, product = R.load_package(p016)
+    ok(os.path.basename(p016) == "FM-1-016.fwsc" and kind == "v15" and product == "FM-1_016"
+       and img == bytes(long_img) and R.find_stock([d]) == p016,
+       "016: M-VAVE's download taken as 016, its whole image")
+with patch.object(R, "fetch", lambda url, timeout=60: b"something else" * 300):
+    try:
+        R.download_stock(tempfile.mkdtemp(), say=lambda *a, **k: None)
+        ok(False, "M-VAVE's download: anything else is refused")
+    except R.Fail as e:
+        ok("neither V15 nor 016" in str(e), "M-VAVE's download: anything else is refused")
+layouts = []
+v016 = bytearray(long_img)
+dev = FakeMflr(now)
+with patch.object(R.FL, "layout", lambda f, key=0x980F: "016" if f[R.APP_END + 5] == v016[R.APP_END + 5] else "015"):
+    R.rescue(R.Uboot(dev), bytes(v016), MFLR, False, tmp, say=lambda *a, **k: None,
+             step=lambda k, v=None: layouts.append((k, v)))
+ok(("layout", {"from": "015", "to": "016"}) in layouts, "015 to 016: the other data layout is pointed out")
+
+# the command line takes M-Flasher's loader by default over USB, JieLi's when asked
+for kind_args, want in (([], "mflr"), (["--loader-kind", "jieli"], "jieli")):
+    used = []
+    dev = FakeMflr(now)
+    with patch.object(R, "get_mflr", side_effect=lambda *a, **k: used.append("mflr") or MFLR), \
+         patch.object(R, "get_loader", side_effect=lambda *a, **k: used.append("jieli") or LOADER), \
+         patch.object(R, "is_admin", return_value=True), patch.object(R.sys, "platform", "win32"), \
+         patch.object(R, "open_device", return_value=dev):
+        code = R.main(["--inspect", "--backup-dir", tmp, "--tries", "1", *kind_args])
+    ok(code == 0 and used == [want], f"CLI: {want} loader {'by default' if not kind_args else 'when asked'}")
+
+# ---- Protect my FM-1: the rescue bootloader in the boot area, nothing else changed
+MB = open_boot(R.MBOOT_VERSION)
+quiet = lambda *a, **k: None                                              # noqa: E731
+
+
+def protect_on(flash, write=True, **kw):
+    d = FakeMflr(flash, **{k: kw.pop(k) for k in ("fid",) if k in kw})
+    up = R.Uboot(d)
+    st = []
+    try:
+        r = R.protect(up, kw.pop("boot", MB), MFLR, write, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)), **kw)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+_, base = flashes()
+r, d, up, st = protect_on(base)
+new = bytes(d.flash)
+ok(r == "installed" and new[R.WRITE_MIN:] == base[R.WRITE_MIN:], "protect: installed, nothing outside the boot area changed")
+ok(FL.bootloader_info(new)[0] == "open" and FL.bootloader_info(new)[2] == R.MBOOT_VERSION
+   and FL.check_boot_area(new) is None, "protect: m-bootloader stored, and the boot area can start the FM-1")
+ok(new[FL.CONFIG_AT:FL.CONFIG_AT + FL.CONFIG_KEY] == base[0x38D0:0x38D0 + FL.CONFIG_KEY],
+   "protect: the FM-1's own chip-key record kept")
+ok(d.erased and all(a < R.WRITE_MIN for a in d.erased) and d.erased[-1] == 0 and d.ran,
+   "protect: only boot sectors erased, the header's last, then restarted")
+plan_ = [v for k, v in st if k == "plan"][0]
+ok([k for k, _ in st][-1] == "done" and any(k == "backup" for k, _ in st) and set(plan_["sectors"]) <= {0, 0x1000, 0x2000, 0x3000}
+   and len(plan_["map"]) == 256, "protect: backup first, a plan with the sectors and the map, then done")
+ok(up.boot_write is False, "protect: the boot-area permission is closed again")
+r, d, _, st = protect_on(new)
+ok(r == "already" and not d.erased and ("already", R.MBOOT_VERSION) in st, "protect: already protected, nothing written")
+r, d, _, st = protect_on(base, write=False)
+ok(r is False and not d.erased and any(k == "plan" for k, _ in st), "protect: without --write it checks and writes nothing")
+older = R.protect(R.Uboot(FakeMflr(new)), open_boot("2.5-new"), MFLR, True, tmp, say=quiet)
+ok(older == "installed", "protect: another rescue bootloader version is replaced")
+broken = bytearray(base)
+broken[:R.WRITE_MIN] = unit_flash(key_ok=False)[:R.WRITE_MIN]
+r, d, _, _ = protect_on(bytes(broken))
+ok(isinstance(r, R.Fail) and "chip-key" in str(r) and not d.erased, "protect: a damaged chip-key record is refused")
+r, d, _, _ = protect_on(base, boot=open_boot("2.4-x", board="smk37"))
+ok(isinstance(r, R.Fail) and "FM-1" in str(r) and not d.erased, "protect: another board's build is refused")
+r, d, _, _ = protect_on(base, boot=open_boot("2.4-x", size=0x3F80))
+ok(isinstance(r, R.Fail) and not d.erased, "protect: a bootloader that does not fit is refused")
+kb = bytearray(base)
+kb[R.TRIM_AT:R.TRIM_AT + len(R.TRIM_MARK)] = R.TRIM_MARK
+r, d, _, _ = protect_on(bytes(kb))
+ok(isinstance(r, R.Fail) and "keyboard" in str(r) and not d.erased, "protect: an SMK-37 is refused")
+r, d, _, _ = protect_on(base, fid=R.UCUN_FLASH)
+ok(isinstance(r, R.Fail) and "UCUN" in str(r) and not d.erased, "protect: UCUN needs its explicit opt-in")
+r, d, _, _ = protect_on(base, fid=R.UCUN_FLASH, allow_ucun=True)
+ok(r == "installed", "protect: and installs with it")
+try:
+    R.protect(R.Uboot(FakeMflr(base, fid=R.UCUN_FLASH)), MB, MFLR, False, tmp, say=quiet, confirm=lambda: True)
+    ok(False, "protect: a plain yes does not allow the UCUN flash")
+except R.Fail as e:
+    ok("UCUN" in str(e), "protect: a plain yes does not allow the UCUN flash")
+ok(R.protect(R.Uboot(FakeMflr(base, fid=R.UCUN_FLASH)), MB, MFLR, False, tmp, say=quiet, confirm=lambda: "ucun")
+   == "installed", "protect: the window's yes with UCUN allowed installs it")
+pfp = str(Path(tmp) / "answer.jsonl")
+pf = R.ProgressFile(pfp)
+R.answer(pfp)
+ok(pf.answer(poll=0) is True, "protect: the window's answer file: go")
+R.answer(pfp, ucun=True)
+ok(pf.answer(poll=0) == "ucun", "protect: go ucun")
+open(pfp + ".stop", "w").close()
+ok(pf.answer(poll=0) is False, "protect: stop wins")
+up2 = R.Uboot(FakeMflr(base))
+try:
+    up2.write_boot_sector(0, bytes(R.SECTOR))
+    ok(False, "protect: no boot-area write outside protect()")
+except R.Fail:
+    ok(True, "protect: no boot-area write outside protect()")
+try:
+    up2.write_sector(0x3000, bytes(R.SECTOR))
+    ok(False, "rescue: still never below 0x4000")
+except R.Fail:
+    ok(True, "rescue: still never below 0x4000")
+d = FakeMflr(base)
+up3 = R.Uboot(d)
+real = up3._program
+
+
+def _half(a, data):                                    # sector 0 erased, then it never writes again
+    if a == 0:
+        up3.wrote = True
+        d.flash[0:R.SECTOR] = b"\xFF" * R.SECTOR
+        raise R.Fail("sector did not verify")
+    real(a, data)
+
+
+up3._program = _half
+with patch("time.sleep"):
+    try:
+        R.protect(up3, MB, MFLR, True, tmp, say=quiet)
+        ok(False, "protect: a sector that will not verify stops it, the permission closed")
+    except R.Fail as e:
+        ok("1 sector could not be put back (0x00000)" in str(e) and "Put back" in str(e)
+           and up3.boot_write is False and bytes(d.flash[R.SECTOR:R.WRITE_MIN]) == base[R.SECTOR:R.WRITE_MIN],
+           "protect: a sector that will never write: the others are put back, it names the one left")
+d = FakeMflr(base)
+up6 = R.Uboot(d)
+real6 = up6._program
+up6._program = lambda a, data: (_ for _ in ()).throw(R.Fail("sector did not verify")) \
+    if a == 0x1000 and data != base[a:a + R.SECTOR] else real6(a, data)
+with patch("time.sleep"):
+    try:
+        R.protect(up6, MB, MFLR, True, tmp, say=quiet)
+        ok(False, "protect: a failed boot sector: the old boot area is written back at once")
+    except R.Fail as e:
+        ok("put back as it was" in str(e) and bytes(d.flash) == base and up6.boot_write is False,
+           "protect: a failed boot sector: the old boot area is written back at once, the FM-1 as before")
+with patch.object(R, "fetch", return_value=b"not it"):
+    try:
+        R.get_mbootloader(None, quiet)
+        ok(False, "protect: a download that is not m-bootloader 2.4 is refused")
+    except R.Fail:
+        ok(True, "protect: a download that is not m-bootloader 2.4 is refused")
+cache = tempfile.mkdtemp()
+with patch.object(R, "fetch", return_value=MB), patch.object(R, "MBOOT_SHA256", R.sha256(MB)):
+    got = R.get_mbootloader(cache, quiet)
+    with patch.object(R, "fetch", side_effect=AssertionError("fetched twice")):
+        ok(got == MB and R.get_mbootloader(cache, quiet) == MB, "protect: the checked download is kept and reused")
+for bad in (["--protect", "fixture.fwsc"], ["--protect", "--inspect"], ["--protect", "--via", "transporter"]):
+    try:
+        with patch("sys.stderr"):
+            R.main(bad)
+        ok(False, "protect: " + " ".join(bad) + " is refused")
+    except SystemExit as e:
+        ok(e.code == 2, "protect: " + " ".join(bad) + " is refused")
+prog = str(Path(tmp) / "protect.jsonl")
+with patch.object(R, "get_mbootloader", return_value=MB), patch.object(R, "get_mflr", return_value=MFLR), \
+        patch.object(R, "is_admin", return_value=True), patch.object(R, "open_device", return_value=FakeMflr(base)), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}), \
+        patch.object(R, "release"):
+    code = R.main(["--protect", "--write", "--backup-dir", tmp, "--progress", prog])
+ev, _ = R.read_progress(prog)
+end = [e for e in ev if "end" in e]
+ok(code == 0 and end and end[-1]["operation"] == "protect" and end[-1]["result"] == "installed",
+   "protect: the command line installs it and reports so")
+
+# ---- Restore: this FM-1's own backup back, boot area included
+def restore_on(flash, backup, write=True, **kw):
+    d = FakeMflr(flash, **{k: kw.pop(k) for k in ("fid",) if k in kw})
+    up = R.Uboot(d)
+    st = []
+    try:
+        r = R.restore(up, backup, MFLR, write, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)), **kw)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+saved = bytes(base)                                    # before Protect: M-VAVE's bootloader
+protected = R.protect(R.Uboot(FakeMflr(base)), MB, MFLR, True, tmp, say=quiet) and new
+changed = bytearray(protected)
+changed[0x50000:0x50010] = b"later presets...."[:16]     # and the user's data has changed since
+changed[0xC0000] ^= 0xFF
+r, d, up, st = restore_on(bytes(changed), saved)
+ok(r == "restored" and bytes(d.flash) == saved, "restore: the whole backup is back, boot area included")
+ok(d.erased and all(a < FL.KEY_MAC[0] for a in d.erased) and d.erased[-1] == 0
+   and all(a >= R.WRITE_MIN for a in d.erased[:-4]) and d.ran, "restore: data first, the boot area last, header last")
+ok(up.full_write is False and up.boot_write is False, "restore: the write permissions are closed again")
+pl = [v for k, v in st if k == "plan"][0]
+ok(pl["boot"] and "m-bootloader" in pl["from"] and "stock" in pl["to"] and len(pl["map"]) == 256,
+   "restore: the plan says the bootloader goes back")
+r, d, _, _ = restore_on(bytes(changed), saved, boot_only=True)
+ok(r == "restored" and bytes(d.flash) == saved[:R.WRITE_MIN] + bytes(changed)[R.WRITE_MIN:],
+   "restore: M-VAVE's bootloader alone back, the firmware and data stay")
+r, d, _, _ = restore_on(bytes(changed), protected, boot_only=True)
+ok(isinstance(r, R.Fail) and "M-VAVE's own bootloader" in str(r) and not d.erased,
+   "restore: boot only needs a backup with M-VAVE's bootloader")
+r, d, _, st = restore_on(saved, saved)
+ok(r == "already" and not d.erased, "restore: the same flash: nothing written")
+r, d, _, st = restore_on(bytes(changed), saved, write=False)
+ok(r is False and not d.erased and any(k == "plan" for k, _ in st), "restore: without --write it checks only")
+other = bytearray(saved)
+other[0xFF010] ^= 0x01
+r, d, _, _ = restore_on(bytes(changed), bytes(other))
+ok(isinstance(r, R.Fail) and "another FM-1" in str(r) and not d.erased, "restore: another FM-1's backup is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, meta={"hardware": {"unique_id": "ffff"}})
+ok(isinstance(r, R.Fail) and "unique ID" in str(r) and not d.erased, "restore: another unique ID is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, meta={"hardware": {"unique_id": "0123456789abcdef"}})
+ok(r == "restored", "restore: the same unique ID is taken")
+dead = bytearray(saved)
+dead[:R.WRITE_MIN] = unit_flash(key_ok=False)[:R.WRITE_MIN]
+r, d, _, _ = restore_on(bytes(changed), bytes(dead))
+ok(isinstance(r, R.Fail) and "boot area" in str(r) and not d.erased, "restore: a backup that could not start it is refused")
+kbb = bytearray(saved)
+kbb[R.TRIM_AT:R.TRIM_AT + len(R.TRIM_MARK)] = R.TRIM_MARK
+r, d, _, _ = restore_on(bytes(kbb), bytes(kbb[:R.TRIM_AT]) + b"x" + bytes(kbb[R.TRIM_AT + 1:]))
+ok(isinstance(r, R.Fail) and "keyboard" in str(r) and not d.erased, "restore: a keyboard is refused")
+r, d, _, _ = restore_on(bytes(changed), saved, fid=R.UCUN_FLASH)
+ok(isinstance(r, R.Fail) and "UCUN" in str(r) and not d.erased, "restore: UCUN needs its explicit opt-in")
+r, d, _, _ = restore_on(bytes(changed), saved[:-1])
+ok(isinstance(r, R.Fail) and not d.erased, "restore: a cut-short backup is refused")
+up4 = R.Uboot(FakeMflr(base))
+try:
+    up4.write_any_sector(0x50000, bytes(R.SECTOR))
+    ok(False, "restore: no write outside restore()")
+except R.Fail:
+    ok(True, "restore: no write outside restore()")
+up4.full_write = True
+try:
+    up4.write_any_sector(FL.KEY_MAC[0], bytes(R.SECTOR))
+    ok(False, "restore: never the key and MAC sector")
+except R.Fail:
+    ok(True, "restore: never the key and MAC sector")
+# ---- something going wrong while it writes: everything written goes back, in the same session
+def failing_restore(fail_at, final_bad=0, again=None, stuck=()):
+    d = FakeMflr(bytes(changed))
+    up = R.Uboot(d)
+    real_p = R.Uboot._program
+    left = {"stuck": set(stuck)}
+
+    def prog(a, data):
+        if a == fail_at and data == saved[a:a + R.SECTOR]:
+            up.wrote = True
+            d.flash[a:a + R.SECTOR] = b"\xFF" * R.SECTOR   # erased, then cut
+            raise R.Fail("sector did not verify")
+        if a in left["stuck"] and data == bytes(changed)[a:a + R.SECTOR]:
+            raise R.Fail("still will not write")       # (putting it back)
+        real_p(up, a, data)
+    up._program = prog
+    st = []
+    real_read = up.read
+    if final_bad:
+        once = {"n": 0}
+
+        def read(a, n):
+            got = real_read(a, n)
+            if n == R.FLASH_SIZE and 2 <= once["n"] < 2 + final_bad:   # (after the backup's two reads)
+                got = bytearray(got)
+                got[0x60000] ^= 0xFF
+                got = bytes(got)
+            once["n"] += n == R.FLASH_SIZE
+            return got
+        up.read = read
+    try:
+        with patch("time.sleep"):
+            r = R.restore(up, saved, MFLR, True, tmp, say=quiet, step=lambda k, v=None: st.append((k, v)),
+                          again=again)
+    except R.Fail as e:
+        r = e
+    return r, d, up, st
+
+
+r, d, up, _ = failing_restore(0xC0000)
+ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) == bytes(changed)
+   and not d.ran, "put back: a firmware/data sector that fails: everything written goes back, as before")
+r, d, up, _ = failing_restore(0x1000)
+ok(isinstance(r, R.Fail) and "put back as it was" in str(r) and bytes(d.flash) == bytes(changed),
+   "put back: a boot sector that fails: the firmware and data written go back as well")
+r, d, up, _ = failing_restore(None, final_bad=1)
+ok(r == "restored" and bytes(d.flash) == saved, "put back: one passing bad final read is read again, not undone")
+r, d, up, _ = failing_restore(None, final_bad=2)
+ok(isinstance(r, R.Fail) and "final read differs" in str(r) and "put back as it was" in str(r)
+   and bytes(d.flash) == bytes(changed), "put back: a final read that differs: everything goes back too")
+asked = []
+r, d, up, st = failing_restore(0x50000, again=lambda: asked.append(1) or (len(asked) < 2),
+                               stuck=(0x50000,))
+ok(isinstance(r, R.Fail) and "could not be put back (0x50000)" in str(r) and len(asked) == 2
+   and [v for k, v in st if k == "putback_failed"][0] == {"sectors": [0x50000]}
+   and bytes(d.flash[0xC0000:0xC1000]) == bytes(changed)[0xC0000:0xC1000],
+   "put back: every sector is tried, the one left is named, the window is asked to try again")
+
+
+# ---- Protect cut off for good (power, cable) after 1-3 of its 4 boot sectors, the next one whole or
+# erased: running Protect again is refused, and the backup from just before puts it back
+class Dead(Exception):
+    pass
+
+
+cut_cases = 0
+for k in (1, 2, 3):
+    for erased in (False, True):
+        d = FakeMflr(base)
+        up = R.Uboot(d)
+        real_c = R.Uboot._program
+        n = {"w": 0}
+
+        def cut(a, data, up=up, d=d, n=n, k=k, erased=erased):
+            if n["w"] == k:
+                if erased:
+                    d.flash[a:a + R.SECTOR] = b"\xFF" * R.SECTOR
+                raise Dead("power cut")
+            n["w"] += 1
+            real_c(up, a, data)
+        up._program = cut
+        up.cmd = lambda *a, **kw: (_ for _ in ()).throw(Dead("gone")) if n["w"] >= k else R.Uboot.cmd(up, *a, **kw)
+        with patch("time.sleep"):
+            try:
+                R.protect(up, MB, MFLR, True, tmp, say=quiet)
+            except Exception:
+                pass
+        half = bytes(d.flash)
+        if half[:R.WRITE_MIN] == base[:R.WRITE_MIN]:
+            continue
+        cut_cases += 1
+        again = FakeMflr(half)
+        try:
+            R.protect(R.Uboot(again), MB, MFLR, True, tmp, say=quiet)
+            ok(False, f"protect cut after {k}: running it again is refused")
+        except R.Fail:
+            ok(not again.erased, f"protect cut after {k} ({'erased' if erased else 'whole'}): running it again "
+               "is refused, nothing written")
+        back = FakeMflr(half)
+        with patch("time.sleep"):
+            r = R.restore(R.Uboot(back), base, MFLR, True, tmp, say=quiet)
+        ok(r == "restored" and bytes(back.flash) == base,
+           f"protect cut after {k} ({'erased' if erased else 'whole'}): the backup from before puts it back")
+ok(cut_cases >= 4, f"protect cut: the half-written cases were tried ({cut_cases})")
+
+
+class Flaky(FakeMflr):                                 # a passing Windows error, then answers
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.bad = 2
+
+    def xfer(self, cdb, data_out=None, n_in=0, timeout=5000):
+        if struct.unpack(">H", bytes(cdb[:2]))[0] in (R.CMD_MFLR_IDENTIFY, R.CMD_GET_ONLINE_DEVICE) and self.bad:
+            self.bad -= 1
+            raise R.Fail("Windows error 31 (command fc0a)")
+        return super().xfer(cdb, data_out, n_in, timeout)
+
+
+with patch("time.sleep"):
+    fl = R.Uboot(Flaky(base))
+    fl.bot.mode = "loader"
+    ok(len(fl.query(R.CMD_GET_ONLINE_DEVICE)) > 4, "query: a passing USB/Windows error is asked again")
+    fl = R.Uboot(Flaky(base))
+    fl.bot.mode, fl.bot.bad = "loader", 5
+    try:
+        fl.query(R.CMD_GET_ONLINE_DEVICE)
+        ok(False, "query: an error that stays is reported")
+    except R.Fail:
+        ok(True, "query: an error that stays is reported")
+
+bdir = Path(tempfile.mkdtemp())
+bf = bdir / "fm1-backup-x.bin"
+bf.write_bytes(saved)
+try:
+    R.read_backup(str(bf))
+    ok(False, "restore: a file without its checksum is refused")
+except R.Fail as e:
+    ok("checksum" in str(e), "restore: a file without its checksum is refused")
+(bdir / "fm1-backup-x.bin.sha256").write_text(R.sha256(saved) + "  fm1-backup-x.bin\n")
+ok(R.read_backup(str(bf))[0] == saved, "restore: a backup with its checksum is read")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "00", "hardware": {}}')
+try:
+    R.read_backup(str(bf))
+    ok(False, "restore: a backup that changed since is refused")
+except R.Fail as e:
+    ok("changed" in str(e), "restore: a backup that changed since is refused")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "%s", "hardware": {"unique_id": "u"}}' % R.sha256(saved))
+ok(R.read_backup(str(bf))[1]["hardware"]["unique_id"] == "u", "restore: its description comes with it")
+for bad in (["--restore", str(bf), "fixture.fwsc"], ["--restore", str(bf), "--protect"],
+            ["--restore", str(bf), "--via", "transporter"], ["--boot-only"]):
+    try:
+        with patch("sys.stderr"):
+            R.main(bad)
+        ok(False, "restore: " + " ".join(bad[2:] or bad) + " is refused")
+    except SystemExit as e:
+        ok(e.code == 2, "restore: " + " ".join(bad[2:] or bad) + " is refused")
+(bdir / "fm1-backup-x.bin.json").write_text('{"backup_sha256": "%s", "hardware": {}}' % R.sha256(saved))
+prog = str(Path(tmp) / "restore.jsonl")
+dev = FakeMflr(bytes(changed))
+with patch.object(R, "get_mflr", return_value=MFLR), patch.object(R, "is_admin", return_value=True), \
+        patch.object(R, "open_device", return_value=dev), patch.object(R, "release"), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}):
+    code = R.main(["--restore", str(bf), "--write", "--backup-dir", tmp, "--progress", prog])
+ev, _ = R.read_progress(prog)
+end = [e for e in ev if "end" in e]
+ok(code == 0 and end and end[-1]["operation"] == "restore" and end[-1]["result"] == "restored"
+   and bytes(dev.flash) == saved, "restore: the command line puts it back and reports so")
+
+# ---- downloads: a certificate the first check cannot follow is tried with the next
+import ssl as _ssl  # noqa: E402
+import urllib.error as _ue  # noqa: E402
+tried = []
+
+
+class _R:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return b"got"
+
+
+def _open(url, timeout=None, context=None):
+    tried.append(context)
+    if context is None:
+        raise _ue.URLError(_ssl.SSLCertVerificationError("unable to get issuer certificate"))
+    return _R()
+
+
+with patch("urllib.request.urlopen", _open):
+    ok(R.fetch("https://x", contexts=[None, "system"]) == b"got" and tried == [None, "system"],
+       "download: an unknown issuer is tried with the system's own check")
+    try:
+        R.fetch("https://x", contexts=[None])
+        ok(False, "download: when no check trusts it, the certificate error is told")
+    except _ue.URLError as e:
+        ok("issuer" in str(e), "download: when no check trusts it, the certificate error is told")
+first = next(R._trust())
+ok(first is not None and first.verify_mode == _ssl.CERT_REQUIRED and first.check_hostname
+   and first.verify_flags & getattr(_ssl, "VERIFY_X509_PARTIAL_CHAIN", 0) == getattr(_ssl, "VERIFY_X509_PARTIAL_CHAIN", 0),
+   "download: the first check takes a chain that ends at any trusted certificate, and still verifies")
+with patch("urllib.request.urlopen", side_effect=_ue.URLError("offline")):
+    try:
+        R.fetch("https://x", contexts=[None, "system"])
+        ok(False, "download: other errors are not retried")
+    except _ue.URLError as e:
+        ok("offline" in str(e), "download: other errors are not retried")
+
+# ---- Windows: a drive letter mounted on the UBOOT disk is locked and dismounted first
+fw = FakeWin32(FakeUboot(base), volumes={"D": 0, "G": 2})
+said = []
+ws = R.WinScsi(r"\\.\PhysicalDrive2", fw, say=said.append)
+ok((R.FSCTL_LOCK_VOLUME, "G") in fw.calls and (R.FSCTL_DISMOUNT_VOLUME, "G") in fw.calls
+   and not any(isinstance(x, tuple) and x[1] == "D" for x in fw.calls) and any("G:" in t for t in said),
+   "Windows: the FM-1's drive letter is locked and dismounted, the system disk left alone")
+ok(1000 + ord("D") in fw.closed and 1000 + ord("G") not in fw.closed, "Windows: only the FM-1's drive stays held")
+ws.close()
+ok(1000 + ord("G") in fw.closed and 102 in fw.closed, "Windows: closing gives it back")
+ok(R.Uboot(R.WinScsi(r"\\.\PhysicalDrive2", FakeWin32(FakeUboot(base)))).inquiry()[0] == "WL82",
+   "Windows: with no drive letter, nothing to lock")
+
+ok("Controlled folder access" in R.CFA_HINT and "FM1-Switch.exe" in R.CFA_HINT,
+   "Windows: error 5 tells how to allow the app through Controlled folder access")
+
+pfp2 = str(Path(tmp) / "answer2.jsonl")
+pf2 = R.ProgressFile(pfp2)
+R.answer(pfp2)
+ok(pf2.answer(poll=0) is True and not os.path.exists(pfp2 + ".go"), "answer: one yes answers one question")
+# a write that has begun is never tried again by itself
+dev2 = FakeMflr(bytes(changed))
+real5 = R.Uboot._program
+
+
+def _drop(self, a, data):
+    real5(self, a, data)
+    if a >= 0x50000:
+        raise OSError("USB gone")
+
+
+bf2 = Path(tempfile.mkdtemp()) / "fm1-backup-y.bin"
+bf2.write_bytes(saved)
+Path(str(bf2) + ".sha256").write_text(R.sha256(saved) + "  x\n")
+opened = []
+with patch.object(R, "get_mflr", return_value=MFLR), patch.object(R, "is_admin", return_value=True), \
+        patch.object(R, "open_device", side_effect=lambda *a, **k: opened.append(1) or dev2), \
+        patch.object(R.Uboot, "_program", _drop), patch.object(R, "release"), patch("time.sleep"), \
+        patch.dict(sys.modules, {"usb": types.ModuleType("usb"), "usb.core": types.ModuleType("usb.core")}):
+    code = R.main(["--restore", str(bf2), "--write", "--tries", "5", "--backup-dir", tmp])
+ok(code == 1 and len(opened) == 1, "restore: once writing has begun, it is not tried again by itself")
 
 print("rescue: all ok" if not failed else f"rescue: {failed} FAILED")
 sys.exit(failed != 0)

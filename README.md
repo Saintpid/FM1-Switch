@@ -14,7 +14,7 @@ can go from one to the other and back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot-light.png" alt="FM-1 Switch: the FM-1's state on top, the firmware files below, Install" width="600">
+  <img src="docs/screenshot-light.png" alt="FM-1 Switch: the FM-1's state on top, then four tasks: Protect my FM-1, Install firmware, Back up my FM-1, My FM-1 won't start" width="600">
 </picture>
 
 It follows the system's dark or light mode (Windows 11's own look, through
@@ -25,6 +25,80 @@ It follows the system's dark or light mode (Windows 11's own look, through
 Ready-made installers are distributed through [Noisebud on Patreon](https://www.patreon.com/Noisebud).
 GitHub hosts the GPL-3.0 source code; CI builds packages for verification without
 uploading installers or application binaries.
+
+### The start screen and Protect my FM-1 in 1.5.0
+
+The window opens on the FM-1's state (and whether it is protected) and four tasks:
+
+| Task | What it does |
+|---|---|
+| **Protect my FM-1** (step 1 until it is done) | installs the rescue bootloader, below |
+| **Install firmware** | the firmware list, Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
+| **Back up my FM-1** | the verified full backup (formerly Hardware / backup) |
+| **My FM-1 won't start** | the guide (formerly Check / unbrick) |
+
+**Advanced** keeps the MIDI input and the rescue through the adapter.
+
+**Protect my FM-1** puts [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (Julius
+Vitkauskas, MIT; its v2.4 FM-1 build, downloaded from its release and checked against its SHA-256) in
+the FM-1's boot area. Afterwards, holding REC while you switch the FM-1 on always opens update mode,
+whatever happened to its firmware, and a damaged firmware is not started. It goes in seven screens:
+why, connect, update mode (the soft key, no keys to hold), the backup, check and confirm, writing, and
+trying REC once.
+
+- It saves a full backup first (two matching reads, the chip's own CRC32, the file read back).
+- It builds the new boot area over the FM-1's own: its chip-key record stays. It must pass the same
+  check as a bootable boot area, and nothing outside the 16 KiB boot area may change; otherwise
+  nothing is written.
+- The review screen shows a map of the flash with the sectors that change, and nothing is written
+  until you tick that you will not unplug it and press **Install**. On the newer UCUN flash it needs a
+  second, separate tick (experimental).
+- It writes the changed boot sectors with the header last, reads the whole flash back and compares it
+  with the chip's CRC32, then restarts the FM-1.
+- An FM-1 that already has this version is only backed up and restarted.
+- From the command line: `fm1_rescue.py --protect` (checks and plans, writes nothing),
+  `--protect --write` or `--protect --ask`.
+
+**Back up my FM-1** lists the backups in `FM-1 Rescue`, newest first, with the firmware and the
+bootloader each holds. **Back up now** saves a new one. **Put back…** returns the FM-1 to that moment,
+boot area included, in the same seven screens: what is on it now is saved first; the backup must match
+its checksum (`.sha256` / `.json`), be this FM-1's own (its key and MAC area, and its flash's unique
+ID when both have one) and be able to start it; the firmware and data sectors are written first, the
+boot area last, and everything is read back and checked. **M-VAVE's bootloader back…** writes only
+the boot area of a backup made before Protect my FM-1. From the command line:
+`fm1_rescue.py --restore BACKUP [--boot-only] --ask` (or `--write`).
+
+**Not released yet:** this waits until m-bootloader has been tried on hardware with Wild and NB303.
+An official M-VAVE update puts M-VAVE's own bootloader back; Protect my FM-1 can then be run again.
+
+### Update mode, M-Flasher's loader and FM-1 016 in 1.5.0
+
+- **No keys to hold.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303, Felucca) and a rescue or
+  **Back up my FM-1** waits for the chip's update mode, FM-1 Switch sends it the soft key over
+  MIDI, and it restarts into that mode by itself. Otherwise the window says which keys reach it.
+- **M-Flasher's flash loader.** Over USB the rescue now starts the flash loader of
+  [M-Flasher](https://github.com/jvitkauskas/m-flasher) (from
+  [m-bootloader](https://github.com/jvitkauskas/m-bootloader)'s v2.3 release, downloaded and checked
+  against its SHA-256). The chip itself then checks every read and every written sector with a
+  CRC32, the flash's unique ID tells one FM-1 from another, and the FM-1's own screen shows what is
+  happening ("DO NOT SWITCH OFF"). `--loader-kind jieli` keeps JieLi's loader, which the adapter
+  always uses.
+- **What is on the FM-1.** The identification now reads which bootloader the FM-1 has (M-VAVE's,
+  m-bootloader and its version, damaged), which firmware (Wild 0.3.38, FM-1 016, Felucca, ...)
+  and whether it is whole, and a map of what each 4 KiB of the flash holds, for the window.
+  Firmwares from [The Firmware Hub](https://thefirmwarehub.com) are named by the identity their app
+  carries (`FM-1_9535` is OberVave), from the hub's list in `tools/fm1_firmwares.py` (CC BY 4.0).
+  When several share one identity (`FM-1_900`), it says "one of: ...". It never guesses: what
+  nobody has checked about a firmware (its keys for update mode, whether it starts under
+  m-bootloader) stays "unknown". `python tools/fm1_firmwares.py --update catalog.json` rewrites the
+  list from the hub's [catalogue](https://thefirmwarehub.com/catalog.json) (read it at most once a
+  day, as the hub asks).
+- **M-VAVE's FM-1 016.** M-VAVE's download now serves 016; the rescue takes V15 or 016 (each known by
+  its SHA-256) and writes 016's whole image, to 0xA9000. When the installed
+  firmware keeps its data in another layout (015 against 016), the rescue says so.
+- **The FM-1's own boot area always stays**, for V15 too, as an update leaves it, and it must be one
+  that can start the FM-1 (a bootloader that passes its checksum, its configuration and chip key
+  whole). A boot area that cannot start it is refused, as writing firmware would not help.
 
 ### Firmware and flash compatibility in 1.4.1
 
@@ -105,7 +179,7 @@ update over USB-MIDI. FM-1 Switch hears them and installs a firmware made for th
 own stock file for it (V11 to V16, known by their SHA-256), or a port with Felucca's update loader
 (see [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37)). A firmware for another model is
 refused before anything is sent, so an FM-1 file never goes on a keyboard, nor a keyboard's on an
-FM-1. Check / unbrick… names the keyboard it hears.
+FM-1. My FM-1 won't start names the keyboard it hears.
 
 Rescue is for the FM-1 only. An SMK-37 in the chip's own update mode (a dark screen, a disk called
 `WL82 UBOOT1.00`) looks like an FM-1 there, so Rescue reads its flash and stops before it writes
@@ -117,7 +191,7 @@ None of this has been tried on a real keyboard yet.
 
 ## A bricked FM-1
 
-Press **Check / unbrick…**. A guide takes you through it in three steps:
+Press **My FM-1 won't start** (the guide; before 1.5.0, Check / unbrick…). It takes you through it in three steps:
 
 1. **It listens to the FM-1** for a few seconds, in every mode it can be in. When the FM-1 answers,
    that decides what to do, with no questions:
@@ -143,24 +217,25 @@ Press **Check / unbrick…**. A guide takes you through it in three steps:
      [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter), an RP2040 board wired to
      the USB lines that wakes the chip's update mode from outside.
 
-**Try to unbrick** (also the **Rescue…** button) puts a firmware back through the chip's own update
+**Try to unbrick** (also **Install firmware › Through update mode…**) puts a firmware back through the chip's own update
 mode, with no extra hardware. First you **choose the firmware**: M-VAVE's V15 is chosen at the top,
 because it is what the FM-1 came with. Any other FM-1 firmware works too: anything in the list, or
 any file with **Browse…** (Wild, NB303, n001se, FiMba-1, another M-VAVE version, other people's
 firmware). Then you **tick that it is at your own risk**, and it starts:
 
-- For V15, it finds the file among your `.fwsc` files by its SHA-256, whatever the file is called. If it is not
-  there, it downloads V15 from M-VAVE's server and checks it. It also downloads JieLi's flash loader
-  (`wl82loader.bin`, from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)) and checks
-  that. Both are kept in `FM-1 Rescue` beside the program.
+- For M-VAVE's firmware, it finds V15 (or 016) among your `.fwsc` files by its SHA-256, whatever the
+  file is called. If neither is there, it downloads M-VAVE's current one from M-VAVE's server and
+  checks it. It also downloads M-Flasher's flash loader (`mflr-loader-a.bin` and `-b.bin`) and checks
+  them. All are kept in `FM-1 Rescue` beside the program.
 - It needs an administrator on Windows (Windows asks) or your password on the Mac, so that it can
   take the FM-1 away from the system.
 - It saves the whole flash (1 MiB) in `FM-1 Rescue` before anything else.
-- It writes only the parts of the firmware area (0x4000–0x93000) that differ from the chosen
-  firmware. The chip's boot code below 0x4000 and the device data above 0x93000 are never written,
-  so the FM-1 keeps its own boot part, the same way an ordinary update does. Nothing is written if
-  the chip and its flash are not the FM-1's, or if the firmware's app area does not decrypt with this
-  chip's key (a firmware for another chip). For V15, the boot part must also already be V15's.
+- It writes only the parts of the firmware area (0x4000–0x93000, or to 0xA9000 for M-VAVE's 016)
+  that differ from the chosen firmware. The boot area below 0x4000 and the device data after the
+  firmware are never written, so the FM-1 keeps its own boot part, the same way an ordinary update
+  does. Nothing is written if the chip and its flash are not the FM-1's, if the firmware's app area
+  does not decrypt with this chip's key (a firmware for another chip), or if the FM-1's own boot area
+  cannot start it.
 - A firmware that is neither V15 nor Felucca-based may not fall back to the chip's update mode by
   itself if it fails to start. The next rescue could then need the adapter.
 - **Stop** gives up while it waits. A write that has begun is finished.
@@ -243,6 +318,7 @@ work on their own from the command line:
 ```
 python3 tools/fm1_install.py PACKAGE.fwsc        # install over USB-MIDI
 python3 tools/fm1_install.py --info              # what the FM-1 runs
+python3 tools/fm1_install.py --update-mode       # restart it into the chip's update mode (writes nothing)
 sudo python3 tools/fm1_rescue.py FM-1.fwsc       # Mac/Linux: check and back up, write nothing
 sudo python3 tools/fm1_rescue.py FM-1.fwsc --write
 python tools/fm1_rescue.py --download --write    # Windows, as administrator (V15 from M-VAVE)
@@ -261,8 +337,12 @@ with no hardware, no Tk and no MIDI or USB packages:
 - `export_test.py`: the Mac export's real bytes as Builder takes them (and refuses a backslash, CRLF,
   a BOM, a missing entrypoint or a licence manifest), the runner's choice of export, the exported
   helpers from a fresh interpreter, the shared runtime's pins, and the Mac build's release rules.
-- `rescue_test.py`: the rescue against a simulated UBOOT (the ROM and JieLi's loader at the level of
-  their commands), over USB, over a simulated Windows pass-through and over a simulated
+- `flash_test.py`: reading a whole flash image (the boot area's table, the stored bootloader and
+  whether it can start the FM-1, the boot areas built for a new bootloader, the sector map).
+- `firmwares_test.py`: the Firmware Hub's list (every pattern, matching by identity, an identity
+  many firmwares share), naming the installed firmware with it, and rewriting it from a catalogue.
+- `rescue_test.py`: the rescue against a simulated UBOOT (the ROM, JieLi's loader and M-Flasher's at
+  the level of their commands), over USB, over a simulated Windows pass-through and over a simulated
   FM-1-transporter. It covers any firmware with the FM-1's head kept, and refuses one for another
   chip key, and an M-VAVE SMK-37 keyboard (before it writes anything).
 
@@ -276,6 +356,11 @@ GPL-3.0 (see `LICENSE`), with no warranty and no liability (its sections 15 and 
 Instruments). The rescue protocol and write policy come from
 [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter) (MIT) and the X0X firmware's
 `fm1_rescue.py`. The adapter support speaks FM-1-transporter's `fm1t` protocol. The flash loader is from [jl-uboot-tool](https://github.com/kagaimiq/jl-uboot-tool)
-(MIT). It is downloaded, not included. The SMK-37 facts (its identities, packages and flash map) come
+(MIT). It is downloaded, not included. M-Flasher's flash loader comes from
+[m-bootloader](https://github.com/jvitkauskas/m-bootloader)'s releases, downloaded and checked, and
+the flash formats, the boot-area checks and the loader's protocol are ported from
+[M-Flasher](https://github.com/jvitkauskas/m-flasher) (both MIT, (c) 2026 Julius Vitkauskas: see
+[third_party/NOTICE.md](third_party/NOTICE.md)). Firmware list: [The Firmware Hub](https://thefirmwarehub.com)
+(CC BY 4.0); each firmware belongs to its maker, named with its repository in the list. The SMK-37 facts (its identities, packages and flash map) come
 from [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37), and the stock packages' SHA-256 from
 [smk-37-pro-docs](https://github.com/jonathaslacerda/smk-37-pro-docs). Not affiliated with M-VAVE or JieLi.

@@ -62,7 +62,7 @@ try:
     S.install(T.FakeFM1(b""), allpk[0], lambda *a: None)
     ok(False, "Install: a package without the loader is refused (Rescue's)")
 except I.InstallError as e:
-    ok(e.code == "badpkg" and "Rescue" in str(e), "Install: a package without the loader is refused (Rescue's)")
+    ok(e.code == "badpkg" and "Through update mode" in str(e), "Install: a package without the loader is refused (Rescue's)")
 ch = S.rescue_choices(folders)
 ok(ch[0] is None and [p.product for p in ch[1:]] == ["FM-1_999", "FM-1_900", "FM-1_846"],
    "rescue choices: V15 first (to download when not found), then any FM-1 firmware")
@@ -140,7 +140,7 @@ ok(S.diagnose(dev, lambda: False, 0.05, poll=0.01) == ("none", None) and S.diagn
    "diagnosis: nothing (and without MIDI or USB probing)")
 texts = [S.advice("running", "FM-1_846"), S.advice("loader", "ota-FM-1_900"), S.advice("uboot"),
          S.advice("none"), S.advice("none", probe_ok=False)]
-ok("Install" in texts[1][1] and "Rescue" in texts[2][1] and "transporter" in texts[3][1]
+ok("Install" in texts[1][1] and "won't start" in texts[2][1] and "won't start" in texts[3][1]
    and "pyusb" in texts[4][1] and "FM-1_846" in texts[0][0], "advice: what to do in each state")
 
 # ---- the unbrick guide: the FM-1 first, questions only when it says nothing, then one thing to try
@@ -176,11 +176,15 @@ ok("--allow-ucun-write" not in a
    and "--allow-ucun-write" in S.rescue_args("v.fwsc", rd, "p", allow_ucun=True),
    "UCUN recovery: explicit opt-in only")
 err = I.InstallError("stopped", "stopped answering after 0 requests")
-ok("UCUN" in S.install_error_text(err) and "does not identify" in S.install_error_text(err)
+ok("UCUN" in S.install_error_text(err) and "does not tell which chip" in S.install_error_text(err)
    and S.install_error_text(I.InstallError("model", "wrong model")) == "wrong model",
    "update diagnosis: possible UCUN incompatibility, no inferred chip ID")
 ok(a[0].endswith("FM-1-V15.fwsc") and "--write" in a and a[a.index("--progress") + 1] == "/tmp/p.jsonl"
    and a[a.index("--backup-dir") + 1] == str(rd), "rescue: V15, --write, the backup folder, the progress file")
+t = S.rescue_args("v.fwsc", rd, "p", via="transporter")
+ok(a[a.index("--mflr-dir") + 1] == str(rd) and "--loader" not in a
+   and t[t.index("--loader") + 1] == str(rd / S.R.LOADER_NAME) and "--mflr-dir" not in t,
+   "rescue: M-Flasher's loader over USB, JieLi's through the adapter")
 cmd = S.helper_command(a, "win32")
 ok(cmd[0] == sys.executable and cmd[1].endswith("fm1_switch.pyw") and cmd[2] == "--rescue" and cmd[3:] == a,
    "rescue: this program again, with --rescue")
@@ -292,8 +296,8 @@ with patch.object(R, "package_flash_image", return_value=ids_image([0x856014])):
     (hw / "fm1-hardware-a.json").write_text(_json.dumps({"hardware": {"flash_name": "UCUN UC25HQ80",
                                                                       "jedec_id": "B36014"}}))
     warn2 = S.flash_warning(pk2, S.last_hardware(hw))
-ok(warn and "B36014" in warn and "864" in warn, "install: Puya-only firmware warned about UCUN flash")
-ok(warn2 and "UCUN UC25HQ80 (B36014)" in warn2.split("identified here")[1], "install: the last identified flash is named")
+ok(warn and "B36014" in warn and "maker says" in warn and "FM-1_864" not in warn, "install: Puya-only firmware warned about UCUN flash")
+ok(warn2 and "newer FM-1 memory chip (UCUN)" in warn2.split("checked here")[1], "install: the last identified flash is named")
 with patch.object(R, "package_flash_image", return_value=ids_image([0x856014, 0xB36014])):
     ok(S.flash_warning(S.Package(wild, "FM-1_869")) is None, "install: firmware with UCUN support not warned")
 with patch.object(R, "package_flash_image", return_value=bytes(img)):
@@ -302,6 +306,154 @@ with patch.object(R, "package_flash_image", return_value=bytes(img)):
 (hw / "fm1-hardware-b.json").write_text("[]")
 ok(S.last_hardware(hw)[0]["jedec_id"] == "B36014" and S.last_hardware(hw / "missing") is None,
    "install: hardware reports read safely")
+
+hw_info = {"flash_name": "Puya P25Q80H", "jedec_id": "856014", "chip_key": "980F", "flash_type": 3,
+           "bootloader_text": "M-VAVE's (stock)", "firmware": "OberVave, by zvenson", "firmware_status": "ok"}
+ok("OberVave, by zvenson" in S.hardware_text({**hw_info, "firmware_hub": ["obervave"]})
+   and "thefirmwarehub.com" in S.hardware_text({**hw_info, "firmware_hub": ["obervave"]})
+   and "thefirmwarehub.com" not in S.hardware_text({**hw_info, "firmware_hub": []}),
+   "window: a firmware named from the hub's list credits it")
+
+# ------------------------------------------------------- protect my FM-1 ---
+pa = S.protect_args(rd, "/tmp/p.jsonl")
+ok(pa[:2] == ["--protect", "--ask"] and "--write" not in pa and pa[pa.index("--progress") + 1] == "/tmp/p.jsonl"
+   and pa[pa.index("--mflr-dir") + 1] == str(rd) and pa[pa.index("--tries") + 1] == "3"
+   and "--allow-ucun-write" not in pa and "--via" not in pa,
+   "protect: the helper asks the window before it writes, over USB, UCUN only by the answer")
+ok(S.chip_text({"jedec_id": "856014"}).startswith("the original") and "UCUN" in S.chip_text({"jedec_id": "b36014"})
+   and S.chip_text({"jedec_id": "123456", "flash_name": "X"}) == "X (123456)", "protect: the flash chip in plain words")
+ft = S.found_text({"jedec_id": "856014"}, {"bootloader_text": "M-VAVE's (stock)", "firmware": "Wild 0.3.43",
+                                           "firmware_status": "ok", "firmware_hub": []})
+ok(ft.count("\n") == 2 and "Wild 0.3.43." in ft and "stock" in ft and "thefirmwarehub" not in ft,
+   "protect: what the backup found")
+ft = S.found_text({"jedec_id": "856014"}, {"firmware": "X", "firmware_status": "damaged",
+                                           "firmware_status_text": "damaged files", "firmware_hub": ["x"]})
+ok("X (damaged files)." in ft and "thefirmwarehub" in ft and S.found_text({"jedec_id": "856014"}, None).count("\n") == 0,
+   "protect: a damaged firmware is said, a hub name credited")
+pt = S.plan_text({"sectors": [0, 0x1000, 0x3000], "firmware_ok": True})
+ok("3 outlined" in pt and "damaged" not in pt and "damaged" in S.plan_text({"sectors": [0], "firmware_ok": False}),
+   "protect: the plan in one sentence")
+lg = S.map_legend(["boot"] * 4 + ["firmware"] * 100 + ["free"] * 150 + ["mac", "boot"])
+ok([x[0] for x in lg] == ["boot", "firmware", "free", "mac"] and lg[0][1] == "Start-up program"
+   and all(c.startswith("#") for _, _, c in lg), "protect: the map's legend, each region once")
+pd = Path(tempfile.mkdtemp(prefix="fm1-protect-"))
+ok(S.protection(pd) is None and S.last_backup(pd) is None, "protect: nothing read yet")
+(pd / "fm1-backup-1.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "stock"}}))
+(pd / "fm1-backup-2.bin.json").write_text("{")
+ok(S.protection(pd) == "not", "protect: a stock bootloader in the last backup: not protected")
+import os as _os  # noqa: E402
+S.mark_protected(pd, "2.4")
+_os.utime(pd / "protected.json", (2e9, 2e9))
+ok(S.protection(pd) == "protected", "protect: after an install, protected")
+(pd / "fm1-backup-3.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "stock"}}))
+_os.utime(pd / "fm1-backup-3.bin.json", (2.1e9, 2.1e9))
+ok(S.protection(pd) == "not", "protect: a later backup with the stock bootloader wins (an M-VAVE update put it back)")
+(pd / "fm1-backup-4.bin.json").write_text(_json.dumps({"hardware": {"bootloader": "open"}}))
+_os.utime(pd / "fm1-backup-4.bin.json", (2.2e9, 2.2e9))
+ok(S.protection(pd) == "protected" and S.last_backup(pd)[0]["bootloader"] == "open",
+   "protect: a backup with m-bootloader in it: protected")
+ok(all(k in S.PROTECTION_TEXT for k in ("protected", "not", None)) and set(S.TASK_TEXT) ==
+   {"protect", "install", "backup", "guide"}, "window: the start screen's four tasks and the protection line")
+
+# ------------------------------------------------------------- backups ---
+ra = S.protect_args(rd, "p", "restore", "/b/fm1-backup-1.bin")
+sa = S.protect_args(rd, "p", "stock", "/b/fm1-backup-1.bin")
+ok(ra[:2] == ["--restore", "/b/fm1-backup-1.bin"] and "--boot-only" not in ra and "--ask" in ra and "--protect" not in ra
+   and sa[2] == "--boot-only" and "--write" not in ra + sa, "backups: put back, or the boot area alone, after the window's yes")
+bd = Path(tempfile.mkdtemp(prefix="fm1-backups-"))
+for n, kind, when in (("a", "stock", 1.0e9), ("b", "open", 1.1e9)):
+    f = bd / f"fm1-backup-{n}.bin"
+    f.write_bytes(bytes(R.FLASH_SIZE))
+    (bd / f"fm1-backup-{n}.bin.json").write_text(_json.dumps({"backup_sha256": "x", "hardware": {
+        "firmware": "Wild 0.3.43", "bootloader": kind, "bootloader_text": kind + " text"}}))
+    _os.utime(f, (when, when))
+(bd / "fm1-backup-c.bin").write_bytes(b"short")
+(bd / "fm1-backup-c.bin.json").write_text('{"backup_sha256": "x"}')
+(bd / "fm1-backup-d.bin").write_bytes(bytes(R.FLASH_SIZE))
+bl = S.backups(bd)
+ok([b["path"].name for b in bl] == ["fm1-backup-b.bin", "fm1-backup-a.bin"] and bl[1]["kind"] == "stock"
+   and S.backup_row(bl[0])[1:] == ("Wild 0.3.43", "open text") and S.backups(bd / "none") == [],
+   "backups: whole ones with their description, newest first")
+ok("3 outlined" in S.restore_plan_text({"sectors": [0, 1, 2], "boot": True, "firmware": "Wild"})
+   and "start-up program." in S.restore_plan_text({"sectors": [0], "boot": True})
+   and "already the same" in S.restore_plan_text({"sectors": [0x5000], "boot": False})
+   and "not touched" in S.restore_plan_text({"sectors": [0], "boot_only": True}), "backups: the plan in one sentence")
+S.mark_protected(pd, None, "not")
+_os.utime(pd / "protected.json", (2.3e9, 2.3e9))
+ok(S.protection(pd) == "not", "backups: M-VAVE's bootloader put back: not protected")
+ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S.FLOW.values()),
+   "backups: each flow has its words")
+ok("Put this backup back" in S.PUTBACK_GAVE_UP and "Put this backup back" in S.PROTECT_FAIL_WRITTEN
+   and "Try again" not in S.PROTECT_FAIL_WRITTEN and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in
+   S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in S.PROTECT_FAIL_WRITTEN and "waits as long" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
+st = "off"
+for present in (True, True, None, True):
+    st = S.rec_step(st, present)
+ok(st == "off", "REC: an FM-1 still in update mode after writing does not count as REC working")
+for present in (False, None, True):
+    st = S.rec_step(st, present)
+ok(st == "rec" and S.rec_step("rec", False) == "rec", "REC: it must leave update mode and come back")
+ok("dark" in S.REC_STEPS[1] and "PLAY" in S.REC_NOTE and "normal" in S.advice("uboot")[1],
+   "REC: the screen stays dark in update mode, PLAY shows the menu")
+ok("RESTARTING" in S.REC_STEPS[0], "REC: says to switch it off when it did not restart by itself")
+import re as _re
+_ui = " ".join(str(v) for k, v in vars(S).items() if k.isupper() and k not in ("SUBDIRS", "PROJECTS", "MAKER_TIP")
+               and isinstance(v, (str, tuple, dict)))
+ok(not _re.search(r"\b(Wild|NB303)\b", _ui + S.advice("running", "X")[1] + S.advice("uboot")[1] + S.advice("none")[1]
+                  + " ".join(" ".join(S.plan(st, "X", sc).steps) for st in ("running", "uboot", "none")
+                             for sc in (None, "normal", "safe", "dark", "loop"))),
+   "texts: no firmware is favoured by name (M-VAVE's V15 only, as the factory one)")
+import time  # noqa: E402
+sd = Path(tempfile.mkdtemp(prefix="fm1-start-"))
+st0 = S.start_state(sd)
+ok((st0["backup"], st0["protect"], st0["firmware"]) == (False, False, False) and S.start_next(st0) == "backup",
+   "start here: a new FM-1 begins with the backup")
+(sd / "fm1-backup-1.bin").write_bytes(bytes(R.FLASH_SIZE))
+(sd / "fm1-backup-1.bin.json").write_text(_json.dumps({"backup_sha256": "x", "hardware": {"bootloader": "stock"}}))
+ok(S.start_next(S.start_state(sd)) == "backup", "start here: a backup that does not match its checksum does not count")
+(sd / "fm1-backup-1.bin.json").write_text(_json.dumps({"backup_sha256": R.sha256(bytes(R.FLASH_SIZE)),
+                                                       "hardware": {"bootloader": "stock"}}))
+_os.utime(sd / "fm1-backup-1.bin", (time.time() - 50, time.time() - 50))
+ok(S.start_next(S.start_state(sd)) == "protect", "start here: a saved backup ticks step 1, Protect is next")
+S.start_mark(sd, "protect", "skipped")
+ok(S.start_state(sd)["protect"] == "skipped" and S.start_next(S.start_state(sd)) == "firmware",
+   "start here: Protect can be skipped")
+S.start_mark(sd, "firmware")
+ok(S.start_next(S.start_state(sd)) is None, "start here: an install from here ticks the last step")
+S.mark_protected(sd, "2.4")
+ok(S.start_state(sd)["protect"] is True, "start here: a protected FM-1 ticks Protect")
+S.start_over(sd)
+so = S.start_state(sd)
+ok(not so["backup"] and not so["protect"] and not so["firmware"],
+   "start here: Start over (another FM-1) counts only what happens from then on")
+ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker") and "patreon.com" in S.MAKER_TIP_URL,
+   "start here: the hub linked, the one firmware tip labelled as the maker's")
+
+_main_src = Path(S.__file__).read_text(encoding="utf-8")
+_inst = _main_src[_main_src.index("    def do_install():"):_main_src.index("        busy(True)", _main_src.index("    def do_install():"))]
+ok("inst.withdraw()" in _inst and _inst.rindex("inst.withdraw()") > _inst.rindex("askyesno"),
+   "install: the firmware list closes once Install is confirmed")
+
+_sheets = {}
+try:
+    import sv_ttk as _sv
+    for _d in (False, True):
+        _sheets[_d] = S.png_rgba((Path(_sv.__file__).parent / "theme" /
+                                  ("spritesheet_dark.png" if _d else "spritesheet_light.png")).read_bytes())[2]
+except ImportError:
+    pass
+_w, _h, _rows = S.png_rgba(S.png_bytes(2, 1, [bytearray(b"\x01\x02\x03\x04\xff\x00\x80\x40")]))
+ok((_w, _h, bytes(_rows[0])) == (2, 1, b"\x01\x02\x03\x04\xff\x00\x80\x40"), "look: a PNG made here reads back the same")
+_bad = [(h, d) for d in _sheets for h, c in S.HUES.items()
+        for fill in [tuple(S.tinted(_sheets[d], *S.BUTTON_SPRITES[st], 20, 20, S._rgb(c), .3)[10][40:43])
+                     for st in ("rest", "hover", "pressed")]
+        if S.contrast(S.soft_text(S._rgb(c), fill, d), fill) < 4.5]
+ok(not _bad and S.contrast((0, 0, 0), (255, 255, 255)) > 20,
+   f"look: every soft button's text reads at 4.5:1 or more, light and dark ({len(_sheets)} themes) {_bad}")
+
+_theme = _main_src[_main_src.index("sv_ttk.set_theme("):_main_src.index("C = dict(PALETTE[dark])")]
+ok('"<<ThemeChanged>>", ""' in _theme and "configure_colors" in _theme,
+   "look: sv_ttk's colours applied once, so our own label colours (Muted, Badge) stay")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

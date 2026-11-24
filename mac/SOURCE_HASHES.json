@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "imported": "2026-11-02",
-  "note": "Byte-identical copies. Update from upstream (never patch here) and change these hashes together; tests/export_test.py checks them, release.ps1 compares them with the canonical files.",
+  "imported": "2026-11-24",
+  "note": "Byte-identical copies. Update from upstream (never patch here) and change these hashes together; tests/export_test.py checks them, release.ps1 compares them with the canonical files (text files there with CR bytes removed, since upstream working copies may be CRLF; the copies here are LF).",
   "files": {
     "mac/signing/noisebud_signing.py": {
       "sha256": "930a965a08a26419d9bb296fd030ad300bb229693600cbcbe3c15b72d013aa50",
@@ -12,8 +12,8 @@
       "source": "C:/Projects/Noisebud Mac Signing/noisebud-signing.json"
     },
     "mac/noisebud-mac/package_common.py": {
-      "sha256": "ca320dba56e0697cd8ff88837ac94fa2d9e82741c7cf0892595c5a26a07fad83",
-      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py (same bytes as PER scripts/noisebud-mac)"
+      "sha256": "026d3cd617b9d08b1df45ea910531193265ee24665f219e42d9e1b750ef3cdd2",
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py"
     },
     "mac/noisebud-mac/verify_native_mac.py": {
       "sha256": "8f5e99906d66e48baac1347c7091184d394079e52cba3e861a86c78e31924197",

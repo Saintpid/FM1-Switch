@@ -48,7 +48,8 @@ PYTHON_VERSION = (3, 12)               # python-rtmidi 1.5.8 has wheels for 3.8-
 ARCHES = ("arm64", "x86_64")
 # Exact versions; the native ones are joined from their arm64 and x86_64 wheels.
 PURE = ["mido==1.3.3", "packaging==24.2", "pyusb==1.3.1", "pyserial==3.5", "sv-ttk==2.6.1",
-        "importlib_resources==6.5.2"]                  # (libusb-package needs it; the native ones go --no-deps)
+        "importlib_resources==6.5.2",                  # (libusb-package needs it; the native ones go --no-deps)
+        "truststore==0.10.1", "certifi==2025.1.31"]    # (downloads: the system's verifier, then certifi's list)
 NATIVE = {"python-rtmidi": "1.5.8", "libusb-package": "1.0.30.0"}
 NATIVE_PLATFORMS = {"arm64": "macosx_11_0_arm64", "x86_64": "macosx_10_9_x86_64"}
 TOOLS = ["pyinstaller==6.22.3", "delocate==0.13.0"]
@@ -210,6 +211,7 @@ def pyinstaller(root, py, work):
         "--hidden-import", "mido.backends.rtmidi",
         "--hidden-import", "usb.backend.libusb1", "--collect-all", "libusb_package",
         "--hidden-import", "serial.tools.list_ports", "--collect-data", "sv_ttk",
+        "--hidden-import", "truststore", "--hidden-import", "certifi", "--collect-data", "certifi",
         "--add-data", f"{root / 'VERSION'}:.", "--add-data", f"{root / 'LICENSE'}:.",
         "--add-data", f"{root / 'DISCLAIMER.md'}:.",
         "--distpath", work / "dist", "--workpath", work / "pyi", "--specpath", work,

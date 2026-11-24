@@ -2,6 +2,135 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.12
+
+- **Built the same way every time.** Releases are now made from Noisebud Builder. A second build
+  started while one runs stops with a message instead of breaking the first, every build uses
+  Python 3.12 and an old checkout is not built by mistake.
+
+## 1.5.11
+
+- **Grey and blue texts are back.** RECOMMENDED, NEXT and the quieter help texts had all turned plain
+  black (white in dark mode): the theme kept setting every text's colour again after the app had set
+  its own.
+
+## 1.5.10
+
+- **A little colour.** Buttons have a soft tint now, so it is easier to see what can be pressed, and
+  each task has its own: Protect green-blue, Install firmware amber, the guide violet, the rest blue.
+  The next thing to do is still the one strong blue button. Works in light and dark mode.
+- The Start here cards no longer show white strips behind their buttons.
+
+## 1.5.9
+
+- **The firmware list goes away when you press Install.** Once you have said yes, its window
+  closes and the main window shows how the install is going. Through update mode… closes it too.
+- **Start here on Windows:** a Protect made just before Start over no longer counts for the next FM-1.
+
+## 1.5.8
+
+- **Ready for the Mac build.** The shared Mac packaging code is updated to its current version, and
+  the Mac app checks downloads with the Mac's own list of trusted certificates (with a built-in list
+  as a fallback), so fetching a firmware works on a fresh Mac too.
+
+## 1.5.7
+
+- **Start here, sturdier.** Its ticks now say which FM-1 they are for (the one backed up, and when),
+  Start over begins again for another FM-1, a backup counts only if it still matches its checksum,
+  Put on a firmware asks before going on without a backup, and on Windows the backup step says what
+  to do if the ransomware protection blocks the app. The tip from the app's maker links to its post.
+
+## 1.5.6
+
+- **Start here.** A new button at the top takes someone who has just got an FM-1 through the three
+  first things, in order: make a backup, give it a spare key (Protect my FM-1, which can be skipped),
+  put on a firmware. Each step is ticked from what is really there, so it remembers how far you got.
+  The firmware step links to The Firmware Hub, where FM-1 firmwares are listed.
+- **Putting a backup back after a cut-off write, made clearer.** Its steps no longer ask you to
+  switch the FM-1 on and let its firmware start (it waits in update mode, and that is what is
+  needed), a Put back that was itself cut off offers the same backup again, not the half-written
+  copy, and a helper that stops while writing is no longer reported as "nothing changed".
+
+## 1.5.5
+
+- **If Protect is cut off halfway, the way back is one button.** Running Protect again would be
+  refused then (the start-up area is no longer whole), so the window offers Put this backup back,
+  with the backup made just before writing already chosen.
+- **Neutral words.** The app no longer names particular firmwares in its help texts: it is for any
+  FM-1 firmware. (M-VAVE's own V15 is still named as the factory one.)
+
+## 1.5.4
+
+- **Safer advice when writing stopped halfway.** The window now says to leave the FM-1 switched on
+  and try again (or put the backup back) right away, while it still waits in update mode, and to
+  switch it off only if FM-1 Switch cannot find it. The REC test points to the window's tick, since a
+  dark screen alone does not prove it.
+
+## 1.5.3
+
+- **Plain words everywhere.** Every screen was rewritten so you do not need to know what a
+  bootloader, a flash sector or a JEDEC ID is: Protect my FM-1 explains itself as a spare key, the
+  map shows squares, the chip has a name you can read, and every "power-cycle" now says what to do:
+  switch it off, wait 10 seconds, switch it on. The technical details are still shown, last.
+- **Clearer words about update mode.** The FM-1's screen stays dark in update mode: the REC steps say
+  so, and the start screen no longer says the firmware does not start when the FM-1 is there after REC,
+  a backup or an install. Holding PLAY at power-on (the rescue bootloader's menu) is named as the way
+  to see on the FM-1 itself that it is protected.
+
+## 1.5.2
+
+- **Try it: hold REC tells the truth.** After writing, the FM-1 may stay in update mode instead of
+  restarting by itself. The window now waits until it has left update mode and come back with REC
+  held before it says the rescue works, and the FM-1's screen and the window say to switch it off and
+  on when it does not restart.
+
+## 1.5.1
+
+- **If writing goes wrong, it is undone at once.** Should a sector not write, the USB link drop or the
+  final read differ (it is read a second time first), Protect my FM-1 and Put back… write everything
+  they changed back from the backup read moments before, in the same session, and check it: the FM-1
+  is then exactly as it was. If that does not finish either, the window keeps the FM-1 in update mode
+  and offers to try again, and says plainly what to do if it gave up.
+- **Fewer passing USB errors on Windows.** The questions FM-1 Switch asks the chip in update mode are
+  asked again after a passing Windows error.
+
+## 1.5.0
+
+- **A new start screen.** The window now opens on four tasks: Protect my FM-1, Install firmware (the
+  firmware list and the rescue, which is now Through update mode…), Back up my FM-1 and My FM-1 won't
+  start (the guide). The MIDI input and the adapter rescue are under Advanced.
+- **Protect my FM-1.** Installs the rescue bootloader (m-bootloader 2.4 by Julius Vitkauskas), step by
+  step: afterwards, holding REC while you switch the FM-1 on always opens update mode. It saves a full
+  backup first, shows on a map of the flash what changes (only the boot area), keeps the FM-1's own
+  chip key, writes only after you confirm, reads everything back and checks it, and lets you try REC
+  once. Not on the newer UCUN flash unless you tick that too (experimental).
+- **Put a backup back.** Back up my FM-1 lists the backups saved so far, newest first, with their
+  firmware and bootloader. Put back… returns the FM-1 to exactly that moment, bootloader, sounds,
+  patterns and settings included; M-VAVE's bootloader back… takes only the boot area from a backup
+  made before Protect my FM-1. Only the same FM-1's own, checked backups are taken, and what is on it
+  now is saved first.
+- **No keys to hold to reach the update mode.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303,
+  Felucca), Rescue and Hardware / backup restart it into the chip's own update mode over MIDI. If it
+  does not answer, the window says which keys get it there. `fm1_install.py --update-mode` does the
+  same from the command line.
+- **M-Flasher's flash loader.** Rescue and Hardware / backup now run the loader of M-Flasher
+  (m-bootloader's v2.3 build, downloaded and checked): the chip checks every read and every written
+  sector with its own CRC32, the flash's unique ID is saved with the backup, and the FM-1's screen
+  shows what is happening. JieLi's loader stays for the adapter and with `--loader-kind jieli`.
+- **See what is on the FM-1.** Hardware / backup names the bootloader (M-VAVE's, m-bootloader and its
+  version, or damaged) and the firmware (Wild 0.3.38, FM-1 016, Felucca, ...), and whether it is
+  whole.
+- **Knows the community firmwares.** The firmware on the FM-1 is named from The Firmware Hub's list
+  of about 300 firmwares (OberVave, Felucca, SLOOP, ...), by the identity it carries; several that
+  share one are told as "one of: ...". What is not known about a firmware stays "unknown".
+- **M-VAVE's FM-1 016.** M-VAVE's download now gives 016; Rescue takes V15 or 016 and writes 016 whole
+  (to 0xA9000). It points out when the firmware on the FM-1 keeps its data in another layout.
+- **The FM-1 keeps its own bootloader, for V15 too.** A rescue to V15 no longer stops when the FM-1's
+  boot area is not V15's (016's, m-bootloader): it must just be one that can start the FM-1.
+- Firmware list: [The Firmware Hub](https://thefirmwarehub.com) (CC BY 4.0).
+- Thanks to Julius Vitkauskas's [M-Flasher](https://github.com/jvitkauskas/m-flasher) and
+  [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (MIT): their loader, formats and checks.
+
 ## 1.4.1
 
 - **Firmware checked against the flash before flashing.** The app area of the chosen `.fwsc` is
