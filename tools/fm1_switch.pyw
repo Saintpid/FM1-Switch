@@ -763,7 +763,8 @@ def map_legend(regions):
     return [(r, R.FL.REGION_TEXT.get(r, r), MAP_COLORS.get(r, MAP_COLORS["free"])) for r in seen]
 
 
-REC_STEPS = ("Switch the FM-1 off.",
+REC_STEPS = ("Switch the FM-1 off (if its screen still says RESTARTING, that is fine: it may not restart by "
+             "itself).",
              "Hold REC and switch it on. Keep holding REC until its screen shows update mode.",
              "Let go of REC. Then switch it off and on again without holding anything: your firmware "
              "starts as before.")
@@ -809,6 +810,17 @@ STOCK_WHY = ("This puts M-VAVE's own bootloader back from a backup made before P
              "area changes: the firmware, sounds, patterns and settings stay.",
              "Afterwards, holding REC no longer opens update mode. An official M-VAVE update does the same.",
              "What is on the FM-1 now is saved first, as a new backup.")
+
+
+def rec_step(st, present):
+    """Try it: hold REC. "off": waiting for the FM-1 to leave update mode (after writing it may stay
+    there until switched off), "on": waiting for it to come back with REC held, "rec": it did. An FM-1
+    that never left update mode does not pass (present: True, False, or None = cannot tell)"""
+    if st == "off":
+        return "on" if present is False else "off"
+    if st == "on":
+        return "rec" if present else "on"
+    return st
 
 
 def restore_plan_text(p):
@@ -1584,19 +1596,23 @@ def main():
                  + "Try it once, so you know it works:")
             for i, t in enumerate(REC_STEPS, 1):
                 text(f"{i}. {t}", pady=(px(6), 0))
-            seen = tk.StringVar(value="Waiting for the FM-1 in update mode…")
+            seen = tk.StringVar(value="Waiting for the FM-1 to be switched off…")
             text("", style="Head.TLabel", var=seen, pady=(px(14), 0))
             text(REC_NOTE, style="Muted.TLabel", pady=(px(6), 0))
             ttk.Button(r, text="Done", style="Accent.TButton", command=finish).pack(side="right")
 
             def watch():
-                time.sleep(3)           # (the FM-1 has just left update mode to start its firmware)
-                got = False
+                # the FM-1 must first leave update mode (it may not restart by itself: then it stays there
+                # until switched off), and only then come back to it: else an FM-1 that never left would pass
+                st = "off"
                 while live["open"] and live["page"] == "rec":
-                    if not got and R.uboot_present():
-                        got = True
-                        ui(seen.set, "✓ Update mode reached: the rescue works. Now switch it off and on.")
-                    elif got:
+                    if st != "rec":
+                        was, st = st, rec_step(st, R.uboot_present())
+                        if st == "on" and was == "off":
+                            ui(seen.set, "Waiting for the FM-1 in update mode…")
+                        elif st == "rec":
+                            ui(seen.set, "✓ Update mode reached: the rescue works. Now switch it off and on.")
+                    else:
                         try:
                             st_, ident = diagnose(backend, None, 0, port=port)
                         except Exception:

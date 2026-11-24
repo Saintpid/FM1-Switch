@@ -1031,6 +1031,7 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, step=
     if isinstance(dev, Uboot):
         dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
         dev.show(12, " RESTARTING")
+        dev.show(14, " IF STUCK: OFF+ON")
     say("  the flash now holds the firmware. Restarting the FM-1 ...")
     dev.run_app()
     step("done", None)
@@ -1097,7 +1098,9 @@ def protect(dev, boot, loader, write, backup_dir, say=print, confirm=None, step=
         dev.boot_write = False
     dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
     dev.show(12, " RESTARTING")
-    say(f"  the rescue bootloader {version} is installed and verified. Restarting the FM-1 ...")
+    dev.show(14, " IF STUCK: OFF+ON")
+    say(f"  the rescue bootloader {version} is installed and verified. Restarting the FM-1 (if it does not "
+        "restart within a few seconds, switch it off and on) ...")
     dev.run_app()
     step("done", version)
     return "installed"
@@ -1196,7 +1199,9 @@ def restore(dev, backup, loader, write, backup_dir, say=print, confirm=None, ste
         dev.full_write = dev.boot_write = False
     dev.show(5, " DONE - VERIFIED", SCREEN_MINT)
     dev.show(12, " RESTARTING")
-    say("  the backup is back and verified. Restarting the FM-1 ...")
+    dev.show(14, " IF STUCK: OFF+ON")
+    say("  the backup is back and verified. Restarting the FM-1 (if it does not restart within a few seconds, "
+        "switch it off and on) ...")
     dev.run_app()
     step("done", None)
     return "restored"

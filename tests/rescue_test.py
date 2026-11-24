@@ -802,7 +802,8 @@ backup = [v for k, v in steps if k == "backup"][0]
 meta = json.loads(Path(backup + ".json").read_text())
 ok(meta["hardware"]["unique_id"] == "0123456789abcdef" and meta["chip_crc32_checked"]
    and meta["hardware"]["bootloader_text"] == "M-VAVE's (stock)", "MFLR: the flash's unique ID and the analysis saved")
-ok(any("DO NOT SWITCH OFF" in t for t in dev.shown) and any("DONE - VERIFIED" in t for t in dev.shown),
+ok(any("DO NOT SWITCH OFF" in t for t in dev.shown) and any("DONE - VERIFIED" in t for t in dev.shown)
+   and any("IF STUCK: OFF+ON" in t for t in dev.shown),
    "MFLR: the FM-1's own screen says what happens")
 ana = [v for k, v in steps if k == "analysis"]
 ok(ana and len(ana[0]["map"]) == 256 and ana[0]["map"][0] == "boot", "MFLR: the flash map for the window")

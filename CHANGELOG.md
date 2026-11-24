@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.2
+
+- **Try it: hold REC tells the truth.** After writing, the FM-1 may stay in update mode instead of
+  restarting by itself. The window now waits until it has left update mode and come back with REC
+  held before it says the rescue works, and the FM-1's screen and the window say to switch it off and
+  on when it does not restart.
+
 ## 1.5.1
 
 - **If writing goes wrong, it is undone at once.** Should a sector not write, the USB link drop or the

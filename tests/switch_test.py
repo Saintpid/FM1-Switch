@@ -385,6 +385,14 @@ ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S
    "backups: each flow has its words")
 ok("Put back" in S.PUTBACK_GAVE_UP and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch" not in
    S.PUTBACK_GAVE_UP and "kept in update mode" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
+st = "off"
+for present in (True, True, None, True):
+    st = S.rec_step(st, present)
+ok(st == "off", "REC: an FM-1 still in update mode after writing does not count as REC working")
+for present in (False, None, True):
+    st = S.rec_step(st, present)
+ok(st == "rec" and S.rec_step("rec", False) == "rec", "REC: it must leave update mode and come back")
+ok("RESTARTING" in S.REC_STEPS[0], "REC: says to switch it off when it did not restart by itself")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)
