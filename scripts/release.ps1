@@ -5,8 +5,8 @@
 # Build_FM1Switch_Mac.command to SEM. Every copy is made with cmd copy and checked (size, SHA-256).
 #   powershell -ExecutionPolicy Bypass -File scripts\release.ps1 [-SkipWindowsInstaller] [-SkipMacHandoff]
 # Noisebud Builder runs this same script on Windows. One build at a time (build\release.lock), Python 3.12
-# unless -Python names another, only the branch's newest commit, and no setup file or export replaced
-# by a different one of the same name.
+# unless -Python names another, and only the branch's newest commit. Building the same version again
+# (after a failed run) replaces its setup file and export; a change to the app gets a new VERSION.
 # On the Mac: register builder-flows.json in Noisebud Builder once (merge it into its flows.json), then
 # build "FM-1 Switch · free app" there, or double-click Build_FM1Switch_Mac.command in SEM.
 param(
@@ -72,14 +72,8 @@ Write-Host "Python: $Python"
 # Resilio: PowerShell Copy-Item is unreliable, so cmd copy and verify.
 function Copy-Verified([string]$source, [string]$destination, [switch]$Keep) {
     if ($Keep -and (Test-Path -LiteralPath $destination)) {
-        # never replace a setup file or export: the same bytes are fine, different ones stop the release
-        $had = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
-        if ($had -ne (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash) {
-            throw ("$destination already exists and is a different build (a rebuild never makes the same " +
-                   "bytes). Bump VERSION for a new build: one version, one installer.")
-        }
-        Write-Host "  $(Split-Path $destination -Leaf): already there, the same bytes"
-        return
+        # a rebuild of the same version (say after a failed run) replaces it; a change to the app gets a new VERSION
+        Write-Host "  $(Split-Path $destination -Leaf): already there, replaced by this build of the same version"
     }
     cmd /c copy /Y "$source" "$destination" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Copy failed: $source" }
