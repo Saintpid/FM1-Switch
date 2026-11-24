@@ -885,11 +885,12 @@ def start_state(d):
     seen = seen if isinstance(seen, dict) else {}
     since = seen.get("since", 0)
     good = [b for b in backups(d) if b["when"] >= since and _backup_ok(b)]
-    try:
-        pw = (Path(d) / "protected.json").stat().st_mtime
-    except OSError:
+    try:  # its own time (a file's mtime can run ahead of time.time() on Windows)
+        pf = Path(d) / "protected.json"
+        pw = json.loads(pf.read_text(encoding="utf-8")).get("when") or pf.stat().st_mtime
+    except (OSError, ValueError, AttributeError):
         pw = 0
-    prot = protection(d) == "protected" and (pw >= since or bool(good) and good[0]["kind"] == "open")
+    prot = protection(d) == "protected" and (pw > since or bool(good) and good[0]["kind"] == "open")
     return {"backup": bool(good),
             "protect": True if prot else "skipped" if seen.get("protect") == "skipped" else False,
             "firmware": bool(seen.get("firmware")), "since": since,

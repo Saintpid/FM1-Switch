@@ -13,7 +13,7 @@
     },
     "mac/noisebud-mac/package_common.py": {
       "sha256": "026d3cd617b9d08b1df45ea910531193265ee24665f219e42d9e1b750ef3cdd2",
-      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py (same bytes as PER scripts/noisebud-mac)"
+      "source": "C:/Projects/Noisebud Follower/mac-packaging/package_common.py"
     },
     "mac/noisebud-mac/verify_native_mac.py": {
       "sha256": "8f5e99906d66e48baac1347c7091184d394079e52cba3e861a86c78e31924197",
