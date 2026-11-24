@@ -1153,6 +1153,53 @@ ok(isinstance(r, R.Fail) and "could not be put back (0x50000)" in str(r) and len
    "put back: every sector is tried, the one left is named, the window is asked to try again")
 
 
+# ---- Protect cut off for good (power, cable) after 1-3 of its 4 boot sectors, the next one whole or
+# erased: running Protect again is refused, and the backup from just before puts it back
+class Dead(Exception):
+    pass
+
+
+cut_cases = 0
+for k in (1, 2, 3):
+    for erased in (False, True):
+        d = FakeMflr(base)
+        up = R.Uboot(d)
+        real_c = R.Uboot._program
+        n = {"w": 0}
+
+        def cut(a, data, up=up, d=d, n=n, k=k, erased=erased):
+            if n["w"] == k:
+                if erased:
+                    d.flash[a:a + R.SECTOR] = b"\xFF" * R.SECTOR
+                raise Dead("power cut")
+            n["w"] += 1
+            real_c(up, a, data)
+        up._program = cut
+        up.cmd = lambda *a, **kw: (_ for _ in ()).throw(Dead("gone")) if n["w"] >= k else R.Uboot.cmd(up, *a, **kw)
+        with patch("time.sleep"):
+            try:
+                R.protect(up, MB, MFLR, True, tmp, say=quiet)
+            except Exception:
+                pass
+        half = bytes(d.flash)
+        if half[:R.WRITE_MIN] == base[:R.WRITE_MIN]:
+            continue
+        cut_cases += 1
+        again = FakeMflr(half)
+        try:
+            R.protect(R.Uboot(again), MB, MFLR, True, tmp, say=quiet)
+            ok(False, f"protect cut after {k}: running it again is refused")
+        except R.Fail:
+            ok(not again.erased, f"protect cut after {k} ({'erased' if erased else 'whole'}): running it again "
+               "is refused, nothing written")
+        back = FakeMflr(half)
+        with patch("time.sleep"):
+            r = R.restore(R.Uboot(back), base, MFLR, True, tmp, say=quiet)
+        ok(r == "restored" and bytes(back.flash) == base,
+           f"protect cut after {k} ({'erased' if erased else 'whole'}): the backup from before puts it back")
+ok(cut_cases >= 4, f"protect cut: the half-written cases were tried ({cut_cases})")
+
+
 class Flaky(FakeMflr):                                 # a passing Windows error, then answers
     def __init__(self, *a, **k):
         super().__init__(*a, **k)

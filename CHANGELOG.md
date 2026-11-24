@@ -2,6 +2,14 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.5
+
+- **If Protect is cut off halfway, the way back is one button.** Running Protect again would be
+  refused then (the start-up area is no longer whole), so the window offers Put this backup back,
+  with the backup made just before writing already chosen.
+- **Neutral words.** The app no longer names particular firmwares in its help texts: it is for any
+  FM-1 firmware. (M-VAVE's own V15 is still named as the factory one.)
+
 ## 1.5.4
 
 - **Safer advice when writing stopped halfway.** The window now says to leave the FM-1 switched on

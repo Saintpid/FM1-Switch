@@ -296,7 +296,7 @@ with patch.object(R, "package_flash_image", return_value=ids_image([0x856014])):
     (hw / "fm1-hardware-a.json").write_text(_json.dumps({"hardware": {"flash_name": "UCUN UC25HQ80",
                                                                       "jedec_id": "B36014"}}))
     warn2 = S.flash_warning(pk2, S.last_hardware(hw))
-ok(warn and "B36014" in warn and "864" in warn, "install: Puya-only firmware warned about UCUN flash")
+ok(warn and "B36014" in warn and "maker says" in warn and "FM-1_864" not in warn, "install: Puya-only firmware warned about UCUN flash")
 ok(warn2 and "newer FM-1 memory chip (UCUN)" in warn2.split("checked here")[1], "install: the last identified flash is named")
 with patch.object(R, "package_flash_image", return_value=ids_image([0x856014, 0xB36014])):
     ok(S.flash_warning(S.Package(wild, "FM-1_869")) is None, "install: firmware with UCUN support not warned")
@@ -383,7 +383,8 @@ _os.utime(pd / "protected.json", (2.3e9, 2.3e9))
 ok(S.protection(pd) == "not", "backups: M-VAVE's bootloader put back: not protected")
 ok(set(S.FLOW) == {"protect", "restore", "stock"} and all(len(v) == 4 for v in S.FLOW.values()),
    "backups: each flow has its words")
-ok("Put back" in S.PUTBACK_GAVE_UP and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in
+ok("Put this backup back" in S.PUTBACK_GAVE_UP and "Put this backup back" in S.PROTECT_FAIL_WRITTEN
+   and "Try again" not in S.PROTECT_FAIL_WRITTEN and "won't start" in S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in
    S.PUTBACK_GAVE_UP and "Do not switch the FM-1 off yet" in S.PROTECT_FAIL_WRITTEN and "waits as long" in S.PUTBACK_FAILED, "put back: the words when it gave up, and to try again")
 st = "off"
 for present in (True, True, None, True):
@@ -395,6 +396,13 @@ ok(st == "rec" and S.rec_step("rec", False) == "rec", "REC: it must leave update
 ok("dark" in S.REC_STEPS[1] and "PLAY" in S.REC_NOTE and "normal" in S.advice("uboot")[1],
    "REC: the screen stays dark in update mode, PLAY shows the menu")
 ok("RESTARTING" in S.REC_STEPS[0], "REC: says to switch it off when it did not restart by itself")
+import re as _re
+_ui = " ".join(str(v) for k, v in vars(S).items() if k.isupper() and k not in ("SUBDIRS", "PROJECTS")
+               and isinstance(v, (str, tuple, dict)))
+ok(not _re.search(r"\b(Wild|NB303)\b", _ui + S.advice("running", "X")[1] + S.advice("uboot")[1] + S.advice("none")[1]
+                  + " ".join(" ".join(S.plan(st, "X", sc).steps) for st in ("running", "uboot", "none")
+                             for sc in (None, "normal", "safe", "dark", "loop"))),
+   "texts: no firmware is favoured by name (M-VAVE's V15 only, as the factory one)")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

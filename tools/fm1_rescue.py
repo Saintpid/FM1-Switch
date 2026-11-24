@@ -909,8 +909,8 @@ def inspect_backup(dev, loader, backup_dir, say=print, step=None, owner=None, im
         step("compat", {"support": support, "reason": why})
         if support == "unsupported":
             raise Fail(f"this firmware does not support this FM-1's flash, {info['flash_name']} ({fid:06X}): "
-                       f"{why}. Choose a version that supports it (Wild from FM-1_864, NB303 from "
-                       "FM-1_908, or M-VAVE's V15); nothing read or written")
+                       f"{why}. Choose a version whose maker says it supports this flash (or M-VAVE's V15); "
+                       "nothing read or written")
         if support == "unknown" and fid != 0x856014:
             say(f"  warning: {why}; whether it keeps its saves on this flash is not known")
     say("  reading the whole flash ...")
@@ -1774,7 +1774,7 @@ def main(argv=None):
                     help="explicitly allow EXPERIMENTAL UCUN UC25HQ80 recovery over direct USB")
     ap.add_argument("--download", action="store_true", help="fetch V15 from M-VAVE (checked) if no package is given")
     ap.add_argument("--any-firmware", action="store_true",
-                    help="allow another FM-1 package than V15 (Wild, NB303, n001se, FiMba-1, another "
+                    help="allow another FM-1 package than V15 (any FM-1 firmware, another "
                          "M-VAVE version...): its app area is written, the FM-1's own boot head stays")
     ap.add_argument("--via", choices=("usb", "transporter"), default="usb",
                     help="usb: the chip's update mode on this computer's USB (default); transporter: "

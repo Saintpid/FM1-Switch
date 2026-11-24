@@ -212,8 +212,8 @@ def flash_warning(pkg, hardware=None):
     text = (f"{pkg.path.name} ({pkg.product}) does not work with the newer FM-1 memory chip (UCUN, "
             f"B36014): {why}.\n\n"
             "FM-1s sold since autumn 2026 have this chip. On such an FM-1, this firmware forgets what you "
-            "save when you switch it off, and the update may stop halfway. Wild from FM-1_864 and NB303 from "
-            "FM-1_908 work with it.")
+            "save when you switch it off, and the update may stop halfway. Choose a version whose maker says "
+            "it works with UCUN.")
     if hardware:
         info, when = hardware
         text += ("\n\nThe last FM-1 checked here "
@@ -287,7 +287,7 @@ def hardware_text(info):
 
 
 UPDATE_MODE_KEYS = ("If it does not show up: switch the FM-1 off. If it is protected, hold REC while you "
-                    "switch it on. With Wild or NB303 running, you can also hold OCT− and OCT+ for 5 seconds.")
+                    "switch it on. Some firmwares also open it when you hold OCT− and OCT+ for 5 seconds.")
 
 
 def send_update_mode(backend, port=None):
@@ -369,8 +369,8 @@ def advice(state, ident=None, probe_ok=True):
                 + KEYBOARD_NOTE)
     if state == "running":
         return (f"FM-1: connected, running {ident}",
-                "All good. Install firmware… puts another firmware on it. If its screen freezes (Wild, "
-                "NB303), hold OCT− and OCT+ for 5 seconds: Install still works from there.")
+                "All good. Install firmware… puts another firmware on it. If its screen freezes: some "
+                "firmwares open update mode when you hold OCT− and OCT+ for 5 seconds.")
     if state == "loader":
         return (f"FM-1: waiting for a firmware ({ident})",
                 "An install was stopped halfway, and the FM-1 is waiting for it. Nothing is broken: open "
@@ -383,8 +383,8 @@ def advice(state, ident=None, probe_ok=True):
                 "won't start.")
     return ("FM-1: not found",
             "1. Plug the FM-1 straight into the computer (no hub) with a cable that carries data (some "
-            "only charge). Switch it on. Close other music apps. 2. Shows a picture but no answer? Hold "
-            "OCT− and OCT+ for 5 seconds, then press Check again. 3. Screen dark, or it keeps restarting? "
+            "only charge). Switch it on. Close other music apps. 2. Shows a picture but no answer? Some "
+            "firmwares answer after you hold OCT− and OCT+ for 5 seconds; then press Check again. 3. Screen dark, or it keeps restarting? "
             "Open My FM-1 won't start."
             + ("" if probe_ok else " (This computer cannot see update mode: pyusb is missing.)"))
 
@@ -393,7 +393,7 @@ def advice(state, ident=None, probe_ok=True):
 # The unbrick guide: what the FM-1 says first; the user's answers only where it says nothing; then
 # one thing to try, behind one button.
 
-SCREEN = (("normal", "Its usual picture (or Wild / NB303)"),
+SCREEN = (("normal", "Its usual picture (its firmware runs)"),
           ("safe", "The words \"SAFE MODE\""),
           ("update", "The words \"UPDATE MODE\""),
           ("dark", "Nothing: the screen stays dark"),
@@ -448,7 +448,8 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
         return Plan("install", f"Good news: the FM-1 works (it runs {ident})",
                     ["Nothing is broken. To put another firmware on it, pick one in the list and press "
                      "Install.",
-                     "If its screen freezes, hold OCT− and OCT+ for 5 seconds: Install still works from there."],
+                     "If its screen freezes: some firmwares open update mode when you hold OCT− and OCT+ for 5 "
+                     "seconds, and Install still works from there."],
                     "Install the chosen file")
     if state == "loader":
         return Plan("finish", "An install stopped halfway: the FM-1 is waiting for it",
@@ -463,7 +464,7 @@ def plan(state, ident=None, screen=None, last=None, rescue_failed=False):
                         "If it ends up here every time you switch it on, its firmware does not start. Then "
                         "the steps below put a working firmware back. Everything on it is saved first."])
     if screen in ("normal", "safe", "update"):
-        what = {"normal": "It runs", "safe": "It is in Wild's safe mode (USB on, no sound)",
+        what = {"normal": "It runs", "safe": "It is in its firmware's safe mode (USB on, no sound)",
                 "update": "It is in update mode"}[screen]
         return Plan("check", f"{what}, but the computer cannot hear it",
                     [*CABLE, "Switch the FM-1 off and on, then press Check again."
@@ -493,7 +494,7 @@ def _rescue(title, why):
                                                                            else "your password") + ".",
                  "Switch the FM-1 off and on (or let it keep restarting). When its screen goes black, it is "
                  "caught. Copying takes about a minute: keep the cable in.",
-                 "Then it runs the firmware you picked. From V15 you can install Wild or NB303 as usual."],
+                 "Then it runs the firmware you picked. From V15 you can install any other firmware as usual."],
                 "Try to unbrick")
 
 
@@ -778,23 +779,25 @@ REC_STEPS = ("Switch the FM-1 off. (If its screen still says RESTARTING, that is
 REC_NOTE = ("Want to see it on the FM-1's own screen? Hold PLAY instead of REC while you switch it on: a menu "
             "appears (M-VAVE's original start-up program has none). Choose Boot app, or switch it off and on.")
 PROTECT_FAIL_WRITTEN = ("Do not switch the FM-1 off yet, and keep the cable in: it is most likely still waiting in "
-                        "update mode. Press Try again now: it starts over from the beginning. Only if FM-1 "
-                        "Switch cannot find it: switch it off, hold REC while you switch it on, and try again. "
-                        "If that does not work either, open My FM-1 won't start. Your full backup is saved here:")
+                        "update mode. Press Put this backup back: it makes the FM-1 exactly as it was just "
+                        "before (running it all again would not work now). Only if FM-1 Switch cannot find "
+                        "the FM-1: switch it off, hold REC while you switch it on, and press Put this backup "
+                        "back again. If that does not work either, open My FM-1 won't start. The backup made "
+                        "just before writing:")
 
 PUTBACK_FAILED = ("Something went wrong while writing, and putting things back as they were did not finish "
                   "either ({n} small part{s} left). Keep the cable in and the FM-1 switched on: it waits as long "
                   "as this page is open. Check that the cable sits firmly (no hub), then press Try again.")
 
 PUTBACK_GAVE_UP = ("Not everything could be put back as it was. Do not switch the FM-1 off yet, and keep the "
-                   "cable in: it is most likely still waiting in update mode. Open Back up my FM-1 > Put back… "
-                   "now and put your backup back. Only if FM-1 Switch cannot find it: switch it off, hold REC "
-                   "while you switch it on, and try again. If that does not work either, open My FM-1 won't "
-                   "start. Your full backup is saved here:")
+                   "cable in: it is most likely still waiting in update mode. Press Put this backup back now. "
+                   "Only if FM-1 Switch cannot find the FM-1: switch it off, hold REC while you switch it on, "
+                   "and press Put this backup back again. If that does not work either, open My FM-1 won't "
+                   "start. The backup made just before writing:")
 
 TASK_TEXT = {"protect": "Give the FM-1 a spare key: hold REC while you switch it on, and new firmware can go "
                         "on even if the old one breaks. Do this first.",
-             "install": "Put Wild, NB303, Felucca or another firmware on the FM-1, over the USB cable.",
+             "install": "Put a new firmware on the FM-1, over the USB cable.",
              "backup": "Copy everything on the FM-1 to this computer: firmware, sounds, patterns and settings. "
                        "Put it back later if anything goes wrong.",
              "guide": "The FM-1 does not start, or behaves strangely? A guide finds out what is wrong and what "
@@ -1678,7 +1681,13 @@ def main():
                 text("The FM-1 did not show up in update mode. " + UPDATE_MODE_KEYS, pady=(px(10), 0))
             else:
                 text("Nothing on the FM-1 was changed.", pady=(px(10), 0))
-            ttk.Button(r, text="Try again", style="Accent.TButton", command=connect).pack(side="right")
+            if wrote and "put back as it was" not in msg and live["backup"]:
+                # half written: only the backup from just before brings it back (running it again is
+                # refused: the boot area is no longer whole); that backup, not the newest in the list
+                ttk.Button(r, text="Put this backup back", style="Accent.TButton",
+                           command=lambda b=live["backup"]: (close(), open_protect("restore", b))).pack(side="right")
+            else:
+                ttk.Button(r, text="Try again", style="Accent.TButton", command=connect).pack(side="right")
             ttk.Button(r, text="Close", command=close).pack(side="right", padx=(0, px(8)))
 
         def finish():
