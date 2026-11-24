@@ -426,7 +426,7 @@ S.start_over(sd)
 so = S.start_state(sd)
 ok(not so["backup"] and not so["protect"] and not so["firmware"],
    "start here: Start over (another FM-1) counts only what happens from then on")
-ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker"),
+ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker") and "patreon.com" in S.MAKER_TIP_URL,
    "start here: the hub linked, the one firmware tip labelled as the maker's")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")

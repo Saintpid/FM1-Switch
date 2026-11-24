@@ -853,7 +853,7 @@ HUB_PAGE = "https://thefirmwarehub.com"
 HUB_LINK = "Where to find firmwares: The Firmware Hub, thefirmwarehub.com"
 # the one place a firmware is named on its own: a tip from the app's maker, labelled as such
 MAKER_TIP = "From the maker of FM-1 Switch: Wild, great if you like dark techno."
-MAKER_TIP_URL = None                                   # (the Patreon post, once given)
+MAKER_TIP_URL = "https://www.patreon.com/Noisebud/posts/noisebud/173838561/"
 START_AFTER = ("After a backup or Protect the FM-1's screen stays dark (update mode). Switch it off, wait 10 "
                "seconds and switch it on: then it starts as usual.")
 START_DONE = "All three done. Have fun! (This window stays here if you want to look again.)"
