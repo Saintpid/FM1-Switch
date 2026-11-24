@@ -1051,6 +1051,155 @@ PALETTE = {True: {"bg": "#1c1c1c", "fg": "#fafafa", "muted": "#a0a0a0", "card": 
                    "bad": "#cf222e", "off": "#8c959f"}}
 
 
+# soft colours for the buttons: each task its own, so what can be pressed shows (light, dark)
+HUES = {"blue": "#2f6fdb", "teal": "#14917c", "amber": "#c27a00", "violet": "#7a5af0"}
+
+
+def _mix(a, b, k):
+    """colour a moved k of the way to colour b, both (r, g, b)"""
+    return tuple(round(x + (y - x) * k) for x, y in zip(a, b))
+
+
+def _rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _hex(c):
+    return "#%02x%02x%02x" % c
+
+
+def _lum(c):
+    v = [x / 255 for x in c]
+    v = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in v]
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+
+
+def contrast(a, b):
+    """WCAG contrast of two (r, g, b) colours, 1 to 21"""
+    la, lb = sorted((_lum(a), _lum(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def png_rgba(data):
+    """an 8-bit RGBA, non-interlaced PNG -> (width, height, [rows of bytes])"""
+    import struct
+    import zlib
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        chunk = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype, _, _, lace = struct.unpack(">IIBBBBB", chunk)
+            if (depth, ctype, lace) != (8, 6, 0):
+                raise ValueError("not 8-bit RGBA")
+        elif kind == b"IDAT":
+            idat += chunk
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * 4, [], bytearray(w * 4)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - 4] if i >= 4 else 0
+            b, c = prev[i], prev[i - 4] if i >= 4 else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    return w, h, rows
+
+
+def png_bytes(w, h, rows):
+    """[rows of RGBA bytes] -> a PNG"""
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(b"\0" + bytes(r) for r in rows)))
+            + chunk(b"IEND", b""))
+
+
+def tinted(rows, x, y, w, h, hue, k):
+    """the sprite at x, y moved k of the way to hue (its see-through edges kept)"""
+    out = []
+    for r in rows[y:y + h]:
+        line = bytearray(r[x * 4:(x + w) * 4])
+        for i in range(0, len(line), 4):
+            line[i:i + 3] = bytes(_mix(tuple(line[i:i + 3]), hue, k))
+        out.append(line)
+    return out
+
+
+def soft_text(hue, fill, dark):
+    """the hue made deeper (light) or paler (dark) until it reads well on fill: 4.5:1 at least"""
+    text = hue
+    while contrast(text, fill) < 4.5:
+        text = _mix(text, (255, 255, 255) if dark else (0, 0, 0), .15)
+    return text
+
+
+BUTTON_SPRITES = {"rest": (162, 40), "hover": (162, 0), "pressed": (162, 20), "focus": (140, 138),
+                  "focus-hover": (120, 144), "dis": (100, 144)}
+
+
+def soft_buttons(root, style, dark):
+    """{hue: style name}: sv_ttk's own button drawn in a soft tint of each hue, its text in a deeper one
+    (4.5:1 at least). Nothing (the plain buttons stay) when the theme's pictures cannot be read."""
+    import base64
+    import tkinter as tk
+    try:
+        import sv_ttk
+        sheet = Path(sv_ttk.__file__).parent / "theme" / ("spritesheet_dark.png" if dark else "spritesheet_light.png")
+        _, _, rows = png_rgba(sheet.read_bytes())
+    except Exception:
+        return {}
+    names, keep = {}, getattr(root, "_soft_images", [])
+    root._soft_images = keep                    # (Tk forgets a picture Python no longer holds)
+    k = {"rest": .16, "focus": .16, "hover": .24, "focus-hover": .24, "pressed": .30, "dis": 0} if dark else \
+        {"rest": .09, "focus": .09, "hover": .15, "focus-hover": .15, "pressed": .21, "dis": 0}
+    for hue, h in HUES.items():
+        c = _rgb(h)
+        img = {}
+        for state, (x, y) in BUTTON_SPRITES.items():
+            pic = tk.PhotoImage(master=root, data=base64.b64encode(png_bytes(20, 20, tinted(rows, x, y, 20, 20, c,
+                                                                                             k[state]))))
+            keep.append(pic)
+            img[state] = pic
+        fill = tuple(tinted(rows, *BUTTON_SPRITES["rest"], 20, 20, c, k["rest"])[10][40:43])   # (its middle)
+        text = soft_text(c, fill, dark)
+        el, name = f"{hue.title()}Button.button", f"{hue.title()}.TButton"
+        style.element_create(el, "image", img["rest"], ("disabled", img["dis"]), ("pressed", img["pressed"]),
+                             ("active focus", img["focus-hover"]), ("active", img["hover"]),
+                             ("focus", img["focus"]), border=4, sticky="nsew")
+        style.layout(name, [(el, {"sticky": "nsew", "children": [
+            ("Button.padding", {"sticky": "nsew", "children": [("Button.label", {"side": "left", "expand": 1})]})]})])
+        style.configure(name, padding=(8, 2, 8, 3), anchor="center", foreground=_hex(text))
+        style.map(name, foreground=[("disabled", "#a2a2a2" if not dark else "#787878")])
+        names[hue] = name
+    return names
+
+
+def card_colour(dark, default):
+    """the colour sv_ttk's cards are filled with, so plain Tk frames on a card match it"""
+    try:
+        import sv_ttk
+        sheet = Path(sv_ttk.__file__).parent / "theme" / ("spritesheet_dark.png" if dark else "spritesheet_light.png")
+        _, _, rows = png_rgba(sheet.read_bytes())
+        return _hex(tuple(rows[25][25 * 4:25 * 4 + 3]))
+    except Exception:
+        return default
+
+
 def dark_titlebar(win, dark):
     """Windows 10/11 draws the title bar dark too when asked (DWMWA_USE_IMMERSIVE_DARK_MODE)"""
     if sys.platform != "win32" or not dark:
@@ -1088,7 +1237,8 @@ def main():
         sv_ttk.set_theme("dark" if dark else "light")
     except Exception:
         ttk.Style().theme_use("clam")
-    C = PALETTE[dark]
+    C = dict(PALETTE[dark])
+    C["card"] = card_colour(dark, C["card"])
     root.configure(background=C["bg"])
     scale = root.winfo_fpixels("1i") / 96.0
 
@@ -1109,6 +1259,11 @@ def main():
     st.configure("Badge.TLabel", foreground=C["accent"], font=(family, small_f[1], "bold"))
     st.configure("Treeview", rowheight=px(30), font=body_f)
     st.configure("Treeview.Heading", font=small_f)
+    soft = soft_buttons(root, st, dark)         # {hue: style}; the plain button where it could not be made
+    if "blue" in soft:                          # every plain button a soft blue: it can be pressed
+        st.layout("TButton", st.layout(soft["blue"]))
+        st.configure("TButton", foreground=st.lookup(soft["blue"], "foreground"))
+        st.map("TButton", foreground=[("disabled", st.lookup(soft["blue"], "foreground", ("disabled",)))])
     root.geometry(f"{px(760)}x{px(600)}")
     root.minsize(px(640), px(520))
     dark_titlebar(root, dark)
@@ -1158,11 +1313,12 @@ def main():
     tasks.rowconfigure((0, 1), weight=1, uniform="t")
     badge = tk.StringVar(value="RECOMMENDED")
 
-    def tile(r, c, title, text, button, command, var=None):
+    def tile(r, c, title, text, button, command, var=None, hue="blue"):
         t = ttk.Frame(tasks, style="Card.TFrame", padding=(px(14), px(12)))
         t.grid(row=r, column=c, sticky="nsew", padx=(0, px(6)) if c == 0 else (px(6), 0),
                pady=(0, px(6)) if r == 0 else (px(6), 0))
-        b = ttk.Button(t, text=button, command=command)
+        b = ttk.Button(t, text=button, command=command, style=soft.get(hue, "TButton"))
+        b.soft = soft.get(hue, "TButton")
         b.pack(side="bottom", anchor="w", pady=(px(8), 0))
         if var is not None:
             ttk.Label(t, textvariable=var, style="Badge.TLabel").pack(anchor="w")
@@ -1171,17 +1327,19 @@ def main():
         d.pack(anchor="w", fill="x", pady=(px(4), 0))
         t.bind("<Configure>", lambda e: d.configure(wraplength=max(px(120), e.width - px(30))))
         return b
-    pb_ = tile(0, 0, "Protect my FM-1", TASK_TEXT["protect"], "Protect…", lambda: open_protect(), badge)
+    pb_ = tile(0, 0, "Protect my FM-1", TASK_TEXT["protect"], "Protect…", lambda: open_protect(), badge, "teal")
     tb_ = [pb_,
-           tile(0, 1, "Install firmware", TASK_TEXT["install"], "Choose firmware…", lambda: show_install()),
+           tile(0, 1, "Install firmware", TASK_TEXT["install"], "Choose firmware…", lambda: show_install(),
+                hue="amber"),
            tile(1, 0, "Back up my FM-1", TASK_TEXT["backup"], "Backups…", lambda: open_backups()),
-           tile(1, 1, "My FM-1 won't start", TASK_TEXT["guide"], "Open the guide…", lambda: open_guide())]
+           tile(1, 1, "My FM-1 won't start", TASK_TEXT["guide"], "Open the guide…", lambda: open_guide(),
+                hue="violet")]
 
     def show_protection():
         p = protection(rescue_dir())
         prot_var.set(PROTECTION_TEXT[p])
         badge.set("" if p == "protected" else "RECOMMENDED")
-        pb_.configure(style="TButton" if p == "protected" else "Accent.TButton")
+        pb_.configure(style=pb_.soft if p == "protected" else "Accent.TButton")
 
     # Install firmware: its own window, made once and shown when asked (the list keeps its files)
     inst = tk.Toplevel(root)
@@ -2265,7 +2423,8 @@ def main():
             for i, (k, *_) in enumerate(START_STEPS):
                 mark, b = rows[k]
                 mark.set({True: "✓ DONE", "skipped": "SKIPPED"}.get(st[k], "NEXT" if k == nxt else ""))
-                b.configure(style="Accent.TButton" if k == nxt else "TButton")
+                b.configure(style="Accent.TButton" if k == nxt else
+                            soft.get({"protect": "teal", "firmware": "amber"}.get(k, "blue"), "TButton"))
             done_var.set(START_DONE if nxt is None else "")
             which.set(("The ticks are for the FM-1 backed up here on "
                        + time.strftime("%Y-%m-%d %H:%M", time.localtime(st["backup_when"]))

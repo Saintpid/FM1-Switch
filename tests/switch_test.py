@@ -434,5 +434,22 @@ _inst = _main_src[_main_src.index("    def do_install():"):_main_src.index("    
 ok("inst.withdraw()" in _inst and _inst.rindex("inst.withdraw()") > _inst.rindex("askyesno"),
    "install: the firmware list closes once Install is confirmed")
 
+_sheets = {}
+try:
+    import sv_ttk as _sv
+    for _d in (False, True):
+        _sheets[_d] = S.png_rgba((Path(_sv.__file__).parent / "theme" /
+                                  ("spritesheet_dark.png" if _d else "spritesheet_light.png")).read_bytes())[2]
+except ImportError:
+    pass
+_w, _h, _rows = S.png_rgba(S.png_bytes(2, 1, [bytearray(b"\x01\x02\x03\x04\xff\x00\x80\x40")]))
+ok((_w, _h, bytes(_rows[0])) == (2, 1, b"\x01\x02\x03\x04\xff\x00\x80\x40"), "look: a PNG made here reads back the same")
+_bad = [(h, d) for d in _sheets for h, c in S.HUES.items()
+        for fill in [tuple(S.tinted(_sheets[d], *S.BUTTON_SPRITES[st], 20, 20, S._rgb(c), .3)[10][40:43])
+                     for st in ("rest", "hover", "pressed")]
+        if S.contrast(S.soft_text(S._rgb(c), fill, d), fill) < 4.5]
+ok(not _bad and S.contrast((0, 0, 0), (255, 255, 255)) > 20,
+   f"look: every soft button's text reads at 4.5:1 or more, light and dark ({len(_sheets)} themes) {_bad}")
+
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")
 sys.exit(failed != 0)

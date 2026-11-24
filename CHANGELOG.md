@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.10
+
+- **A little colour.** Buttons have a soft tint now, so it is easier to see what can be pressed, and
+  each task has its own: Protect green-blue, Install firmware amber, the guide violet, the rest blue.
+  The next thing to do is still the one strong blue button. Works in light and dark mode.
+- The Start here cards no longer show white strips behind their buttons.
+
 ## 1.5.9
 
 - **The firmware list goes away when you press Install.** Once you have said yes, its window
