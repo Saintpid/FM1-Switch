@@ -392,6 +392,8 @@ ok(st == "off", "REC: an FM-1 still in update mode after writing does not count 
 for present in (False, None, True):
     st = S.rec_step(st, present)
 ok(st == "rec" and S.rec_step("rec", False) == "rec", "REC: it must leave update mode and come back")
+ok("dark" in S.REC_STEPS[1] and "PLAY" in S.REC_NOTE and "expected" in S.advice("uboot")[1],
+   "REC: the screen stays dark in update mode, PLAY shows the menu")
 ok("RESTARTING" in S.REC_STEPS[0], "REC: says to switch it off when it did not restart by itself")
 
 print("switch: all ok" if not failed else f"switch: {failed} FAILED")

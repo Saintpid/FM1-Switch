@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.3
+
+- **Clearer words about update mode.** The FM-1's screen stays dark in update mode: the REC steps say
+  so, and the start screen no longer says the firmware does not start when the FM-1 is there after REC,
+  a backup or an install. Holding PLAY at power-on (the rescue bootloader's menu) is named as the way
+  to see on the FM-1 itself that it is protected.
+
 ## 1.5.2
 
 - **Try it: hold REC tells the truth.** After writing, the FM-1 may stay in update mode instead of

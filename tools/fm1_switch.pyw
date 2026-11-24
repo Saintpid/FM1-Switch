@@ -374,8 +374,10 @@ def advice(state, ident=None, probe_ok=True):
                 "one, or any other) in Install firmware… and press Install to finish it.")
     if state == "uboot":
         return ("FM-1: in the chip's own update mode",
-                "Its firmware does not start. Open My FM-1 won't start, or Install firmware… and Through "
-                "update mode…, to put M-VAVE's stock firmware back; "
+                "Its screen stays dark in this mode. After REC held at power-on (the rescue bootloader), a "
+                "backup or an install, that is expected: switch it off and on to start its firmware. If it "
+                "lands here by itself, its firmware does not start: open My FM-1 won't start, or Install "
+                "firmware… and Through update mode…, to put M-VAVE's stock firmware back; "
                 "then install Wild or NB303 as usual. (An SMK-37 keyboard in this mode: Rescue refuses "
                 "it, it is for the FM-1 only.)")
     return ("FM-1: not found",
@@ -765,11 +767,13 @@ def map_legend(regions):
 
 REC_STEPS = ("Switch the FM-1 off (if its screen still says RESTARTING, that is fine: it may not restart by "
              "itself).",
-             "Hold REC and switch it on. Keep holding REC until its screen shows update mode.",
-             "Let go of REC. Then switch it off and on again without holding anything: your firmware "
+             "Hold REC and switch it on. Its screen stays dark: that is update mode. Let go after a few "
+             "seconds.",
+             "Switch it off and on again without holding anything: your firmware "
              "starts as before.")
-REC_NOTE = ("If the FM-1's screen shows update mode, the rescue works, even if this window does not see it. "
-            "(Holding PLAY instead of REC opens the rescue bootloader's menu.)")
+REC_NOTE = ("To see it on the FM-1 itself: hold PLAY instead of REC while you switch it on. The rescue "
+            "bootloader's menu shows (M-VAVE's own bootloader has none); choose Boot app, or switch it off "
+            "and on.")
 PROTECT_FAIL_WRITTEN = ("Do not switch the FM-1 off. Keep it connected: it stays in update mode. Run Protect "
                         "my FM-1 again, which writes the boot area again from the start. Your full backup "
                         "is saved here:")
