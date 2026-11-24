@@ -10,10 +10,11 @@
 # On the Mac: register builder-flows.json in Noisebud Builder once (merge it into its flows.json), then
 # build "FM-1 Switch · free app" there, or double-click Build_FM1Switch_Mac.command in SEM.
 param(
+    # (SetupDest first: a caller that passes the setup folder without a name means it, never -Python)
+    [Parameter(Position = 0)][string]$SetupDest = 'D:\Dropbox\SynthEdit\000 Klara pluggar 000\--- Nya Setupfiler',
     [switch]$SkipWindowsInstaller,
     [switch]$SkipMacHandoff,
     [string]$Python = '',
-    [string]$SetupDest = 'D:\Dropbox\SynthEdit\000 Klara pluggar 000\--- Nya Setupfiler',
     [string]$SemDir = 'C:\Users\Johannes\Documents\SynthEdit Projects\Mac Export\SEM',
     [string]$CheckExport = 'C:\Projects\Noisebud Builder\tools\check_export.py'
 )
@@ -36,12 +37,33 @@ try {
 }
 
 # The same Python every time, so one version is one installer: 3.12 unless -Python says otherwise.
-if (-not $Python) {
-    # (through cmd: Windows PowerShell stops on a native program's error output, even redirected)
-    $Python = (cmd /c 'py -3.12 -c "import sys; print(sys.executable)" 2>nul' | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Python 3.12 was not found (py -3.12). Install it, or pass -Python.' }
-    $Python = $Python.Trim()
+# Looked for in turn: the py launcher, Python's usual install folders, every python on PATH (Builder's
+# environment may lack the launcher). Each candidate is asked for its own version.
+function Find-Python312 {
+    $tried = @()
+    # (no quotes inside: Windows PowerShell 5.1 drops them on the way to a native program)
+    $ask = 'import sys; print(sys.executable if sys.version_info[:2] == (3, 12) else str())'
+    $candidates = @()
+    foreach ($c in @(Get-Command py, py.exe -All -ErrorAction SilentlyContinue)) { $candidates += , @($c.Source, '-3.12') }
+    foreach ($d in @("$env:LOCALAPPDATA\Programs\Python\Python312", "$env:ProgramFiles\Python312",
+                     "${env:ProgramFiles(x86)}\Python312", 'C:\Python312')) {
+        $candidates += , @((Join-Path $d 'python.exe'))
+    }
+    foreach ($c in @(Get-Command python, python3, python3.12 -All -ErrorAction SilentlyContinue)) { $candidates += , @($c.Source) }
+    foreach ($c in $candidates) {
+        if (-not $c[0] -or -not (Test-Path -LiteralPath $c[0])) { continue }
+        $tried += ($c -join ' ')
+        $was = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'      # (a native program's error output would stop the script)
+        $more = @($c | Select-Object -Skip 1)
+        try { $out = & $c[0] $more -c $ask 2>$null | Select-Object -First 1 } catch { $out = $null }
+        $ErrorActionPreference = $was
+        if ($out -and $out.Trim() -and (Test-Path -LiteralPath $out.Trim())) { return $out.Trim() }
+    }
+    throw ('Python 3.12 was not found (install it from python.org, or pass -Python). Tried: ' +
+           $(if ($tried) { $tried -join '; ' } else { 'nothing: no py launcher, no python on PATH' }))
 }
+if (-not $Python) { $Python = Find-Python312 }
 Write-Host "Python: $Python"
 
 # Resilio: PowerShell Copy-Item is unreliable, so cmd copy and verify.
@@ -50,7 +72,8 @@ function Copy-Verified([string]$source, [string]$destination, [switch]$Keep) {
         # never replace a setup file or export: the same bytes are fine, different ones stop the release
         $had = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
         if ($had -ne (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash) {
-            throw "$destination already exists and is a different build. Bump VERSION for a new build."
+            throw ("$destination already exists and is a different build (a rebuild never makes the same " +
+                   "bytes). Bump VERSION for a new build: one version, one installer.")
         }
         Write-Host "  $(Split-Path $destination -Leaf): already there, the same bytes"
         return
@@ -150,4 +173,8 @@ try {
     }
 } finally { Pop-Location }
 
-Write-Host "RELEASE OK $version (Windows installer and static Mac export; the Mac build itself runs on the Mac)"
+$made = @()
+if (-not $SkipWindowsInstaller) { $made += 'Windows installer' }
+if (-not $SkipMacHandoff) { $made += 'static Mac export' }
+Write-Host ("RELEASE OK $version (" + $(if ($made) { $made -join ' and ' } else { 'checks and tests only' }) +
+            '; the Mac build itself runs on the Mac)')
