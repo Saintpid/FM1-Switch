@@ -2,6 +2,16 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.1
+
+- **If writing goes wrong, it is undone at once.** Should a sector not write, the USB link drop or the
+  final read differ (it is read a second time first), Protect my FM-1 and Put back… write everything
+  they changed back from the backup read moments before, in the same session, and check it: the FM-1
+  is then exactly as it was. If that does not finish either, the window keeps the FM-1 in update mode
+  and offers to try again, and says plainly what to do if it gave up.
+- **Fewer passing USB errors on Windows.** The questions FM-1 Switch asks the chip in update mode are
+  asked again after a passing Windows error.
+
 ## 1.5.0
 
 - **A new start screen.** The window now opens on four tasks: Protect my FM-1, Install firmware (the
@@ -17,10 +27,6 @@ A version is a `VERSION` change with its section below (CI checks the section is
   patterns and settings included; M-VAVE's bootloader back… takes only the boot area from a backup
   made before Protect my FM-1. Only the same FM-1's own, checked backups are taken, and what is on it
   now is saved first.
-- **If writing goes wrong, it is undone at once.** Should a sector not write, the USB link drop or the
-  final read differ, Protect my FM-1 and Put back… write everything they changed back from the backup
-  read moments before, in the same session, and check it: the FM-1 is then exactly as it was. If that
-  does not finish either, the window keeps the FM-1 in update mode and offers to try again.
 - **No keys to hold to reach the update mode.** When the FM-1 runs (M-VAVE's firmware, Wild, NB303,
   Felucca), Rescue and Hardware / backup restart it into the chip's own update mode over MIDI. If it
   does not answer, the window says which keys get it there. `fm1_install.py --update-mode` does the
