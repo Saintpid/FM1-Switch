@@ -1,9 +1,10 @@
 # FM-1 Switch's Windows installer, the way the Noisebud apps are built (Pre Flight's build-installer.ps1):
-# PyInstaller stages the app (build\win\dist\FM1-Switch), Inno Setup 6 wraps it with installer\EULA.txt
+# PyInstaller stages the app (build\win-<version>\dist\FM1-Switch), Inno Setup 6 wraps it with installer\EULA.txt
 # (free software, no warranty, no liability for any hardware). Signs the app and the installer when
 # NOISEBUD_WINDOWS_CERT_THUMBPRINT is set (the same variable as the other Noisebud builds).
 #   powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1
-# Output: build\win\FM-1 Switch Setup <version>.exe (release.ps1 copies it to the setup folder).
+# Output: build\win-<version>\FM-1 Switch Setup <version>.exe (release.ps1 copies it to the setup folder).
+# Each version builds in its own folder; an earlier build of the same version is kept, renamed, never deleted.
 param(
     [string]$Python = 'python'
 )
@@ -11,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION is not X.Y.Z: $version" }
-$work = Join-Path $root 'build\win'
+$work = Join-Path $root "build\win-$version"
 $venv = Join-Path $work 'venv'
 $eula = Join-Path $root 'installer\EULA.txt'
 $icon = Join-Path $root 'installer\FM1Switch.ico'
@@ -31,7 +32,11 @@ $compiler = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFil
 if (-not $compiler) { throw 'Inno Setup 6 was not found (https://jrsoftware.org/isdl.php).' }
 
 Write-Host "FM-1 Switch ${version}: Windows installer"
-if (Test-Path -LiteralPath $work) { Remove-Item -Recurse -Force -LiteralPath $work }
+if (Test-Path -LiteralPath $work) {
+    $kept = "$work-old-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    Rename-Item -LiteralPath $work -NewName (Split-Path $kept -Leaf)
+    Write-Host "An earlier $version build was kept as $kept"
+}
 New-Item -ItemType Directory -Force $work | Out-Null
 Invoke-Checked 'venv' { & $Python -m venv $venv }
 $py = Join-Path $venv 'Scripts\python.exe'

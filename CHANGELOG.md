@@ -2,6 +2,13 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.12
+
+- **Built the same way every time.** Releases are now made from Noisebud Builder. A second build
+  started while one runs stops with a message instead of breaking the first, every build uses
+  Python 3.12, an old checkout is not built by mistake, and a setup file or Mac export already in
+  place is never replaced by a different one with the same version.
+
 ## 1.5.11
 
 - **Grey and blue texts are back.** RECOMMENDED, NEXT and the quieter help texts had all turned plain
