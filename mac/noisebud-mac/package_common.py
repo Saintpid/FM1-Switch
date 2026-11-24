@@ -54,6 +54,10 @@ def validate_metadata(metadata, manifest):
     names = metadata['installer']
     if names['releaseVersion'] != release or not safe_leaf(names['fileStem']):
         raise ValueError('Invalid installer name/version')
+    if 'pluginVersion' in names:
+        # Older exports lack it and keep using releaseVersion (plugin_version.py).
+        import plugin_version
+        plugin_version.au_version(names['pluginVersion'])
     for key, prefix, suffix in (('windowsFileName', 'Win_-_', '.exe'), ('macFileName', 'macOS_-_', '.dmg')):
         if names[key] != prefix + names['fileStem'] + suffix or not safe_leaf(names[key]):
             raise ValueError('Inconsistent installer filenames')
@@ -177,6 +181,8 @@ def bundle_executable(bundle):
 
 def validate_plugin(bundle, replacing_followers=False):
     bundle = Path(bundle)
+    if any(re.fullmatch(r"NBDeveloperCore(?:_v[0-9_]+)?\.sem", p.name) for p in bundle.rglob("*.sem")):
+        raise ValueError("Replace NB Developer Core with NB Signal Core in SynthEdit and export again")
     if not {'arm64', 'x86_64'} <= macho_arches(bundle_executable(bundle)):
         raise ValueError('Plugin must contain arm64 AND x86_64: ' + str(bundle))
     followers = [p for p in bundle.rglob('*.sem') if p.is_dir() and

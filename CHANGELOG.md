@@ -2,6 +2,12 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.8
+
+- **Ready for the Mac build.** The shared Mac packaging code is updated to its current version, and
+  the Mac app checks downloads with the Mac's own list of trusted certificates (with a built-in list
+  as a fallback), so fetching a firmware works on a fresh Mac too.
+
 ## 1.5.7
 
 - **Start here, sturdier.** Its ticks now say which FM-1 they are for (the one backed up, and when),

@@ -71,8 +71,19 @@ try {
             $localHash = (Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLower()
             if ($localHash -ne $entry.Value.sha256) { throw "$($entry.Name) differs from its pinned hash" }
             if (Test-Path -LiteralPath $upstream) {
-                $upHash = (Get-FileHash -LiteralPath $upstream -Algorithm SHA256).Hash.ToLower()
-                if ($upHash -ne $localHash) { throw "$($entry.Name) is not upstream's current ${upstream}; import it and update mac\SOURCE_HASHES.json" }
+                # Text files are compared without CR: upstream's working copy may be CRLF, ours is LF.
+                $upBytes = [System.IO.File]::ReadAllBytes($upstream)
+                if ($upstream -match '\.(py|json)$') {
+                    $upBytes = [byte[]]($upBytes | Where-Object { $_ -ne 13 })
+                    $ourBytes = [byte[]]([System.IO.File]::ReadAllBytes($local) | Where-Object { $_ -ne 13 })
+                    $sha = [System.Security.Cryptography.SHA256]::Create()
+                    $upHash = (($sha.ComputeHash($upBytes) | ForEach-Object { $_.ToString('x2') }) -join '')
+                    $cmpHash = (($sha.ComputeHash($ourBytes) | ForEach-Object { $_.ToString('x2') }) -join '')
+                } else {
+                    $upHash = (Get-FileHash -LiteralPath $upstream -Algorithm SHA256).Hash.ToLower()
+                    $cmpHash = $localHash
+                }
+                if ($upHash -ne $cmpHash) { throw "$($entry.Name) is not upstream's current ${upstream}; import it and update mac\SOURCE_HASHES.json" }
             } else {
                 Write-Host "  (upstream not found here, pinned hash only: ${upstream})"
             }
