@@ -600,10 +600,12 @@ try:
 except R.Fail:
     ok(True, "another loader: refused")
 
-# ---- on a real Windows (CI): the kernel32 calls load and look at the disks without an administrator
+# ---- on a real Windows: the kernel32 calls load and look at the disks without an administrator. Only
+# the disks' descriptions are read, and an FM-1 left in update mode on the PC is fine (no command is sent)
 if sys.platform == "win32":
-    ok(R.windows_uboot_disks() == [] and R.uboot_present() is False and R.is_admin() in (True, False),
-       "Windows: the disks looked at, no FM-1 among them")
+    disks = R.windows_uboot_disks()
+    ok(isinstance(disks, list) and R.uboot_present() is bool(disks) and R.is_admin() in (True, False),
+       "Windows: the disks looked at (an FM-1 in update mode among them or not)")
 
 # Approval denial must not signal readiness or start a device wait.
 progress = str(Path(tmp) / "denied.jsonl")
