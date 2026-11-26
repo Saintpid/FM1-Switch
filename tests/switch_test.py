@@ -434,6 +434,41 @@ _inst = _main_src[_main_src.index("    def do_install():"):_main_src.index("    
 ok("inst.withdraw()" in _inst and _inst.rindex("inst.withdraw()") > _inst.rindex("askyesno"),
    "install: the firmware list closes once Install is confirmed")
 
+# ---- the big flash screen: 100 % only when it is safe to unplug, never earlier
+_seq = [("start", "FM-1_900"), ("check", 3), ("loader", None)] + [("write", v) for v in (0, 37, 99, 100)] + \
+       [("reboot", None), ("settle", None), ("safe", None)]
+_ph = [S.flash_phase(k, v) for k, v in _seq]
+ok(all(_ph) and [p[0] for p in _ph] == sorted(p[0] for p in _ph) and [p[0] for p in _ph].count(100) == 1
+   and _ph[-1][0] == 100 and _ph[-1][2] == "safe" and all(p[2] == "keep" for p in _ph[:-1]),
+   "flash screen (install): rises step by step, 100 % and 'safe' only at the very end")
+ok(all(S.flash_phase("settle" if k == "done" else k, v) for k, v in steps),
+   "flash screen (install): every step a real install sends is shown")
+_rs = [("prepare", None), ("ready", None), ("backup_read", 1), ("backup_read", 2), ("backup", "x.bin")] + \
+      [("write", v) for v in (0, 50, 100)] + [("done", None), ("settle", None), ("safe", True)]
+_ph = [S.flash_phase(k, v, "rescue") for k, v in _rs]
+ok(all(_ph) and [p[0] for p in _ph] == sorted(p[0] for p in _ph) and [p[0] for p in _ph].count(100) == 1
+   and [p[2] for p in _ph[:2]] == ["wait", "wait"] and all(p[2] == "keep" for p in _ph[2:-1]),
+   "flash screen (rescue): waits, then keep the cable in, 100 % and 'safe' only at the end")
+ok(S.flash_phase("safe", False, "rescue")[1] == "Written and checked" and S.flash_phase("failed")[0] is None
+   and S.flash_phase("failed")[2] == "ended" and S.flash_phase("hardware", {}, "rescue") is None,
+   "flash screen: not confirmed, failed, and steps it does not show")
+ok("safe to disconnect your FM-1" in S.UNPLUG["safe"] and "Do not unplug" in S.UNPLUG["keep"]
+   and all("safe" not in S.UNPLUG[k].lower() for k in ("wait", "ended")),
+   "flash screen: says it is safe to disconnect only when it is")
+_slept = []
+dev = T.FakeFM1(b"", identity="FM-1_846")
+ok(S.settle(dev, sleep=_slept.append, wait=1) == "FM-1_846" and _slept == [S.SETTLE_SECS] and S.SETTLE_SECS >= 3,
+   "settle: waits a few seconds after hello, then asks the FM-1 again")
+dev.connected = False
+ok(S.settle(dev, sleep=lambda s: None, wait=0.2, poll=0.05) is None, "settle: an FM-1 gone quiet is None")
+_ins = _main_src[_main_src.index("    def do_install():"):_main_src.index("    def add_folder():")]
+ok(_ins.index("install(backend, pkg, step") < _ins.index("settle(backend") < _ins.index('ui(flash_show, "safe")'),
+   "install: safe is shown only after the install returned and the FM-1 settled")
+_res = _main_src[_main_src.index("    def run_rescue("):_main_src.index("    def open_guide(")]
+ok(_res.index("confirm_rescue_boot(") < _res.index("settle(backend") < _res.index('ui(flash_show, "safe"')
+   and _res.count('ui(flash_show, "safe"') == 1 and "showinfo, \"FM-1 Switch\", msg" not in _res,
+   "rescue: safe only after written, checked and the start waited for")
+
 _sheets = {}
 try:
     import sv_ttk as _sv

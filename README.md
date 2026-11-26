@@ -39,6 +39,11 @@ The window opens on the FM-1's state (and whether it is protected) and four task
 
 **Advanced** keeps the MIDI input and the rescue through the adapter.
 
+While a firmware goes on (Install, or Through update mode…) a big progress screen covers the window.
+It reaches 100 % only when it is safe to unplug: the FM-1 has started the new firmware, said which
+one it runs and had a few more seconds to settle (after Through update mode: everything written and
+checked). Then it says, in green, that it is safe to disconnect the FM-1.
+
 **Protect my FM-1** puts [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (Julius
 Vitkauskas, MIT; its v2.4 FM-1 build, downloaded from its release and checked against its SHA-256) in
 the FM-1's boot area. Afterwards, holding REC while you switch the FM-1 on always opens update mode,

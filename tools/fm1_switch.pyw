@@ -224,8 +224,51 @@ def flash_warning(pkg, hardware=None):
 
 
 STEP_TEXT = {"start": "Starting the update on {}", "check": "Checking the file ({} reads)",
-             "loader": "Getting the FM-1 ready to receive it", "write": "Copying to the FM-1: {}%. Keep the cable in.",
+             "loader": "Getting the FM-1 ready to receive it", "write": "Copying the new firmware into the FM-1, piece by piece. Keep the cable in.",
              "reboot": "Restarting the FM-1", "done": "Done: the FM-1 now runs {}"}
+
+
+# the big flash screen: a headline and how far for each step, and what the cable may do. It reaches 100 %
+# only when it is safe to unplug: the new firmware has started, said hello and had a few seconds to settle
+# (a first start may set up its saves), or the rescue has written and checked everything and let go.
+UNPLUG = {"wait": "Nothing has been changed on the FM-1 yet. Do what the line above says.",
+          "keep": "Do not unplug the USB cable and do not switch the FM-1 off yet. "
+                  "This window tells you when it is safe.",
+          "safe": "It is now safe to disconnect your FM-1. You can unplug the USB cable.",
+          "ended": "Nothing is being written any more. Read what went wrong above, then press Close."}
+SETTLE_SECS = 5
+
+
+def flash_phase(kind, value=None, how="midi"):
+    """one step on the big flash screen -> (percent, headline, a key of UNPLUG); None for a step it does
+    not show. how: "midi" (Install over USB-MIDI) or "rescue" (through the chip's update mode).
+    percent None: keep what the bar shows (it failed)"""
+    n = int(value or 0) if kind in ("write", "backup_read") else 0
+    if kind == "settle":
+        return 96, "Almost done: the FM-1 is starting", "keep"
+    if kind == "safe":
+        return 100, "All done!" if value is not False else "Written and checked", "safe"
+    if kind == "failed":
+        return None, "It did not finish", "ended"
+    if how == "midi":
+        return {"start": (2, "Getting ready", "keep"),
+                "check": (6, "The FM-1 checks the new firmware", "keep"),
+                "loader": (10, "The FM-1 gets ready to receive it", "keep"),
+                "write": (10 + n * 80 // 100, "Copying the new firmware", "keep"),
+                "reboot": (92, "The FM-1 restarts with the new firmware", "keep")}.get(kind)
+    return {"prepare": (0, "Getting ready", "wait"),
+            "ready": (0, "Waiting for the FM-1", "wait"),
+            "backup_read": (n * 5, "Making a backup first", "keep"),
+            "backup": (15, "The backup is saved and checked", "keep"),
+            "write": (15 + n * 75 // 100, "Writing the new firmware", "keep"),
+            "done": (92, "Written and checked: the FM-1 restarts", "keep")}.get(kind)
+
+
+def settle(backend, port=None, secs=SETTLE_SECS, sleep=time.sleep, wait=10, poll=0.5):
+    """the FM-1 has said hello with its new firmware: give it secs to finish starting, then -> what it
+    runs if it still answers, else None"""
+    sleep(secs)
+    return confirm_rescue_boot(backend, None, port=port, secs=wait, poll=poll)
 
 
 def later(after, f, *a, **kw):
@@ -1016,7 +1059,7 @@ def _shell_runas(cmd):
 
 RESCUE_STEP = {"ready": "Thanks. Looking for the FM-1; follow the next instruction.",
                "backup_read": "Copying the FM-1's memory ({} of 2). Nothing has been changed.",
-               "backup": "Backup saved and checked: {}", "write": "Writing {}%. Keep the cable in.",
+               "backup": "Backup saved and checked: {}", "write": "Writing the new firmware into the FM-1's memory. Keep the cable in.",
                "done": "Written and checked. Waiting for the FM-1 to start…"}
 
 
@@ -1310,6 +1353,59 @@ def main():
     adv.pack(side="bottom", fill="x", pady=(px(10), 0))
     bar = ttk.Progressbar(top, maximum=100)
     bar.pack(side="bottom", fill="x", pady=(px(12), 0))
+
+    # the big flash screen: over the whole window while a firmware goes on, until it is safe to unplug
+    ov = tk.Frame(root, background=C["bg"])
+    ov_in = tk.Frame(ov, background=C["bg"])
+    ov_in.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.86)
+    ov_head, ov_pct, ov_unplug = tk.StringVar(), tk.StringVar(), tk.StringVar()
+    ttk.Label(ov_in, textvariable=ov_head, style="Title.TLabel", anchor="center").pack(fill="x")
+    ttk.Label(ov_in, textvariable=ov_pct, font=(family, 48 if mac else 40, "bold"),
+              anchor="center").pack(fill="x", pady=(px(6), 0))
+    ov_bar = tk.Canvas(ov_in, height=px(34), highlightthickness=0, bd=0, background=C["bg"])
+    ov_bar.pack(fill="x", pady=(px(10), px(14)))
+    st.configure("Say.TLabel", foreground=C["muted"], font=body_f)
+    ov_say = ttk.Label(ov_in, textvariable=status, style="Say.TLabel", anchor="center", justify="center")
+    ov_say.pack(fill="x")
+    ov_un = tk.Label(ov_in, textvariable=ov_unplug, font=head_f, justify="center", background=C["bg"],
+                     foreground=C["warn"])
+    ov_un.pack(fill="x", pady=(px(18), 0))
+    ov_row = ttk.Frame(ov_in)
+    ov_row.pack(pady=(px(18), 0))
+    ov_stop = ttk.Button(ov_row, text="Stop", command=lambda: stop_rescue())
+    ov_close = ttk.Button(ov_row, text="Close", style="Accent.TButton", command=lambda: flash_close())
+    ov_state = {"pct": 0, "tone": "accent"}
+
+    def ov_draw(_e=None):
+        w, h = max(1, ov_bar.winfo_width()), max(1, ov_bar.winfo_height())
+        ov_bar.delete("all")
+        ov_bar.create_rectangle(0, 0, w, h, fill=C["line"], outline="")
+        ov_bar.create_rectangle(0, 0, w * ov_state["pct"] // 100, h, fill=C[ov_state["tone"]], outline="")
+    ov_bar.bind("<Configure>", ov_draw)
+    ov_in.bind("<Configure>", lambda e: [l.configure(wraplength=max(px(200), e.width - px(20)))
+                                         for l in (ov_say, ov_un)])
+
+    def flash_show(kind, value=None, how="midi"):
+        ph = flash_phase(kind, value, how)
+        if ph is None:
+            return
+        pct, headline, unplug = ph
+        if not ov.winfo_ismapped():
+            ov.place(x=0, y=0, relwidth=1, relheight=1)
+            ov.lift()
+        if pct is not None:
+            ov_state["pct"] = pct
+            ov_pct.set(f"{pct} %")
+        ov_state["tone"] = {"safe": "ok", "ended": "bad"}.get(unplug, "accent")
+        ov_head.set(headline)
+        ov_unplug.set(UNPLUG[unplug])
+        ov_un.configure(foreground=C[{"safe": "ok", "keep": "warn", "ended": "bad"}.get(unplug, "muted")])
+        ov_stop.pack(side="left", padx=px(6)) if how == "rescue" and unplug == "wait" else ov_stop.pack_forget()
+        ov_close.pack(side="left", padx=px(6)) if unplug in ("safe", "ended") else ov_close.pack_forget()
+        ov_draw()
+
+    def flash_close():
+        ov.place_forget()
     ttk.Label(top, text="WHAT DO YOU WANT TO DO?", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
     tasks = ttk.Frame(top)
     tasks.pack(fill="both", expand=True)
@@ -2083,6 +2179,8 @@ def main():
         port = selected_port()
         status.set("Getting ready. Nothing has been changed.")
         bar["value"] = 0
+        if not inspect:
+            flash_show("prepare", how="rescue")
         fd, prog = tempfile.mkstemp(prefix="fm1-rescue-", suffix=".jsonl")
         os.close(fd)
         state["rescue"] = prog
@@ -2103,6 +2201,8 @@ def main():
                 wait = subprocess.Popen(cmd).wait if via != "usb" else run_elevated(cmd)
             except Exception as e:
                 ui(status.set, f"It did not start: {e}")
+                if not inspect:
+                    ui(flash_show, "failed", how="rescue")
                 ui(end_rescue)
                 return
             state["rescue"] = prog
@@ -2119,6 +2219,8 @@ def main():
                         ui(dev_var.set, f"Flash: {hardware['flash_name']} ({hardware['jedec_id']})")
                     elif e.get("step") in RESCUE_STEP:
                         ui(status.set, RESCUE_STEP[e["step"]].format(e.get("value") or ""))
+                        if not inspect:
+                            ui(flash_show, e["step"], e.get("value"), "rescue")
                         if e["step"] == "ready":
                             ui(stopper, True)
                             if via == "usb":                 # a running FM-1: the soft key, no keys to hold
@@ -2152,21 +2254,30 @@ def main():
                 except Exception:
                     identity = None
                 confirmed, msg = rescue_result(end.get("product"), identity)
+                if confirmed:
+                    ui(status.set, f"The FM-1 runs {identity}. Giving it a few seconds to finish starting…")
+                    ui(flash_show, "settle", None, "rescue")
+                    settle(backend, port)
                 ui(dev_var.set, f"FM-1: {identity}" if confirmed else "FM-1: startup not confirmed")
                 ui(set_tone, "ok" if confirmed else "off")
                 ui(status.set, msg)
-                ui(messagebox.showinfo, "FM-1 Switch", msg)
+                ui(flash_show, "safe", confirmed, "rescue")   # written and checked, and the helper let go
             elif end and "did not appear" in (end.get("error") or "") and via == "usb":
                 ui(status.set, "The FM-1 did not show up in update mode.")
+                ui(flash_close)
                 ui(open_guide, "rescue_failed")
             elif end:
                 ui(status.set, f"It did not work: {end.get('error')}")
+                if not inspect:
+                    ui(flash_show, "failed", how="rescue")
                 msg = end.get("error") or "failed"
                 if hardware:
                     msg += "\n\n" + hardware_text(hardware) + "\nHardware report: " + hardware["report"]
                 ui(messagebox.showerror, "FM-1 Switch – It did not work", msg)
             else:
                 ui(status.set, "It did not start: the computer's permission was not given.")
+                if not inspect:
+                    ui(flash_close)
             ui(end_rescue)
 
         def end_rescue():
@@ -2316,6 +2427,7 @@ def main():
 
         def step(kind, value=None):
             ui(status.set, step_text(kind, value))
+            ui(flash_show, "settle" if kind == "done" else kind, value)
             if kind == "write":
                 ui(bar.configure, value=value)
             elif kind == "done":
@@ -2326,14 +2438,23 @@ def main():
 
         def work():
             try:
-                install(backend, pkg, step, port=port)
+                got = install(backend, pkg, step, port=port)
+                ui(status.set, f"Your FM-1 now runs {got}. Giving it a few seconds to finish starting…")
+                still = settle(backend, port)
+                ui(status.set, f"It worked: your FM-1 runs {got}." if still else
+                   f"The firmware {got} is on the FM-1 and started. It then stopped answering: if it does "
+                   "not work, switch it off, wait 10 seconds and switch it on.")
+                ui(flash_show, "safe")
             except I.InstallError as e:
                 ui(status.set, f"Error: {e}")
+                ui(flash_show, "failed")
                 ui(messagebox.showerror, "FM-1 Switch", install_error_text(e))
             except Exception as e:
                 ui(status.set, f"Error: {e}")
+                ui(flash_show, "failed")
             ui(busy, False)
         port = selected_port()
+        flash_show("start")
         threading.Thread(target=work, daemon=True).start()
 
     def add_folder():
