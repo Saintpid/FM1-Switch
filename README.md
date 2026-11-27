@@ -33,11 +33,16 @@ The window opens on the FM-1's state (and whether it is protected) and four task
 | Task | What it does |
 |---|---|
 | **Protect my FM-1** (step 1 until it is done) | installs the rescue bootloader, below |
-| **Install firmware** | the firmware list, Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
+| **Install firmware** | the firmware list (in the main window, Back returns), Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
 | **Back up my FM-1** | the verified full backup (formerly Hardware / backup) |
 | **My FM-1 won't start** | the guide (formerly Check / unbrick) |
 
 **Advanced** keeps the MIDI input and the rescue through the adapter.
+
+While a firmware goes on (Install, or Through update mode…) a big progress screen covers the window.
+It reaches 100 % only when it is safe to unplug: the FM-1 has started the new firmware, said which
+one it runs and had a few more seconds to settle (after Through update mode: everything written and
+checked). Then it says, in green, that it is safe to disconnect the FM-1.
 
 **Protect my FM-1** puts [m-bootloader](https://github.com/jvitkauskas/m-bootloader) (Julius
 Vitkauskas, MIT; its v2.4 FM-1 build, downloaded from its release and checked against its SHA-256) in

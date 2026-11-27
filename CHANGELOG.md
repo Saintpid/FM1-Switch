@@ -2,6 +2,21 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.14
+
+- **The firmware list opens in the main window.** Install firmware no longer opens a window of its
+  own: the main window changes to the list, with a Back button (or Esc) to the tasks. Press
+  Install and it changes straight to the big progress screen.
+
+## 1.5.13
+
+- **A big progress screen while a firmware goes on.** Install and Through update mode… now fill the
+  window with one large bar, the percentage and what is happening, in plain words. It does not
+  vanish when the copying ends: it waits until the FM-1 has restarted, told which firmware it runs
+  and had a few more seconds to settle. Only then does the bar turn green and say "It is now safe
+  to disconnect your FM-1". Until then it says, in amber, not to unplug the cable or switch off.
+- If something goes wrong the bar turns red and says what happened. Close takes you back.
+
 ## 1.5.12
 
 - **Built the same way every time.** Releases are now made from Noisebud Builder. A second build
