@@ -2,6 +2,12 @@
 
 A version is a `VERSION` change with its section below (CI checks the section is there).
 
+## 1.5.14
+
+- **The firmware list opens in the main window.** Install firmware no longer opens a window of its
+  own: the main window changes to the list, with a Back button (or Esc) to the tasks. Press
+  Install and it changes straight to the big progress screen.
+
 ## 1.5.13
 
 - **A big progress screen while a firmware goes on.** Install and Through update mode… now fill the

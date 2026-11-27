@@ -431,8 +431,11 @@ ok("thefirmwarehub.com" in S.HUB_PAGE and S.MAKER_TIP.startswith("From the maker
 
 _main_src = Path(S.__file__).read_text(encoding="utf-8")
 _inst = _main_src[_main_src.index("    def do_install():"):_main_src.index("        busy(True)", _main_src.index("    def do_install():"))]
-ok("inst.withdraw()" in _inst and _inst.rindex("inst.withdraw()") > _inst.rindex("askyesno"),
+ok("hide_install()" in _inst and _inst.rindex("hide_install()") > _inst.rindex("askyesno"),
    "install: the firmware list closes once Install is confirmed")
+_view = _main_src[_main_src.index("    # Install firmware: a view"):_main_src.index("    cols = (\"fam\"")]
+ok("Toplevel" not in _view and "inst = tk.Frame(root" in _view and "inst.place(" in _view and "‹ Back" in _view,
+   "install: the firmware list is a view in the main window, with Back, not a window of its own")
 
 # ---- the big flash screen: 100 % only when it is safe to unplug, never earlier
 _seq = [("start", "FM-1_900"), ("check", 3), ("loader", None)] + [("write", v) for v in (0, 37, 99, 100)] + \

@@ -1441,33 +1441,34 @@ def main():
         badge.set("" if p == "protected" else "RECOMMENDED")
         pb_.configure(style=pb_.soft if p == "protected" else "Accent.TButton")
 
-    # Install firmware: its own window, made once and shown when asked (the list keeps its files)
-    inst = tk.Toplevel(root)
-    inst.withdraw()
-    inst.title("FM-1 Switch – Install firmware")
-    inst.configure(background=C["bg"])
-    inst.geometry(f"{px(720)}x{px(460)}")
-    inst.transient(root)
-    inst.protocol("WM_DELETE_WINDOW", inst.withdraw)
-    inst_f = ttk.Frame(inst, padding=(px(20), px(16)))
+    # Install firmware: a view in the main window, over the start screen (the list keeps its files).
+    # Back (or Esc) goes back to the tasks; Install swaps it for the big flash screen
+    inst = tk.Frame(root, background=C["bg"])
+    inst_f = ttk.Frame(inst, padding=(px(20), px(16), px(20), px(16)))
     inst_f.pack(fill="both", expand=True)
-    ttk.Label(inst_f, text="Install firmware", style="Head.TLabel").pack(anchor="w")
-    ttk.Label(inst_f, text=INSTALL_HELP, style="Muted.TLabel", wraplength=px(670),
-              justify="left").pack(anchor="w", pady=(px(4), px(10)))
+    inst_h = ttk.Frame(inst_f)
+    inst_h.pack(fill="x")
+    back_b = ttk.Button(inst_h, text="‹ Back", command=lambda: hide_install())
+    back_b.pack(side="left")
+    ttk.Label(inst_h, text="Install firmware", style="Title.TLabel").pack(side="left", padx=(px(14), 0))
+    inst_help = ttk.Label(inst_f, text=INSTALL_HELP, style="Muted.TLabel", wraplength=px(700), justify="left")
+    inst_help.pack(anchor="w", pady=(px(10), px(10)))
+    inst_f.bind("<Configure>", lambda e: inst_help.configure(wraplength=max(px(200), e.width - px(44))))
     row = ttk.Frame(inst_f)
     row.pack(side="bottom", fill="x", pady=(px(12), 0))
     ttk.Label(inst_f, text="FIRMWARE FILES", style="Section.TLabel").pack(anchor="w", pady=(0, px(6)))
     lf = ttk.Frame(inst_f)
     lf.pack(fill="both", expand=True)
-    shown_once = {"inst": False}
 
     def show_install():
-        inst.deiconify()
+        inst.place(x=0, y=0, relwidth=1, relheight=1)
         inst.lift()
-        inst.focus_set()
-        if not shown_once["inst"]:
-            shown_once["inst"] = True
-            dark_titlebar(inst, dark)
+        lst.focus_set()
+        root.bind("<Escape>", lambda e: hide_install())
+
+    def hide_install():
+        inst.place_forget()
+        root.unbind("<Escape>")
     cols = ("fam", "name", "id", "note")
     lst = ttk.Treeview(lf, columns=cols, show="headings", selectmode="browse", height=6)
     for c, t, w, s in (("fam", "Family", 90, False), ("name", "File", 280, True), ("id", "Identity", 120, False),
@@ -1594,7 +1595,7 @@ def main():
         """Rescue: 1 choose the firmware to put back, 2 accept the risk, 3 run it"""
         if state["busy"]:
             return
-        inst.withdraw()                 # (its own window has its own list)
+        hide_install()                  # (its own window has its own list)
         d = rescue_dir()
         choices = rescue_choices(folders + [d])
         w = dialog("FM-1 Switch – Through update mode" + (", with the adapter (experimental)" if via != "usb" else ""),
@@ -2421,7 +2422,7 @@ def main():
         if not messagebox.askyesno("FM-1 Switch", f"Install {pkg.path.name} ({pkg.product})?\n\n"
                                                   "Keep the cable in until it is done."):
             return
-        inst.withdraw()                 # the list has done its job: the main window shows the progress
+        hide_install()                  # the list has done its job: the big flash screen takes over
         busy(True)
         bar["value"] = 0
 

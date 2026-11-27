@@ -33,7 +33,7 @@ The window opens on the FM-1's state (and whether it is protected) and four task
 | Task | What it does |
 |---|---|
 | **Protect my FM-1** (step 1 until it is done) | installs the rescue bootloader, below |
-| **Install firmware** | the firmware list, Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
+| **Install firmware** | the firmware list (in the main window, Back returns), Install over USB-MIDI, and **Through update mode…** (the rescue, formerly Rescue…) |
 | **Back up my FM-1** | the verified full backup (formerly Hardware / backup) |
 | **My FM-1 won't start** | the guide (formerly Check / unbrick) |
 
